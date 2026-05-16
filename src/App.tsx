@@ -680,30 +680,23 @@ export default function App() {
           const unit = getVolumeUnit(product)
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
-          const analyticsToneClass =
-            product.statusTone === 'transit'
-              ? 'border-amber-200/70 bg-amber-50 text-amber-900'
-              : 'border-slate-200/80 bg-slate-50 text-slate-800'
-          const analyticsActionClass =
-            product.statusTone === 'transit'
-              ? 'bg-white/70 text-amber-700/80'
-              : 'bg-white text-slate-500'
+          const analyticsActionClass = 'bg-white text-emerald-700'
 
           return (
             <article
               key={product.id}
-              className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-lg shadow-slate-200/70"
+              className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
             >
-              <div className="group relative aspect-[16/10] w-full overflow-hidden bg-slate-200">
+              <div className="group relative h-48 w-full overflow-hidden bg-slate-200">
                 <img
                   src={product.image}
                   alt={product.name}
-                  className="h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
+                  className="h-48 w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
                   loading="lazy"
                   decoding="async"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                <div className="absolute bottom-3 left-3 right-3">
+                <div className="absolute bottom-4 left-4 right-4">
                   <p className="text-xs font-medium text-white/90">{product.subtitle}</p>
                   <h2 className="text-2xl font-bold text-white">{product.name}</h2>
                 </div>
@@ -769,19 +762,19 @@ export default function App() {
                 </p>
 
                 {product.trackSteps && product.trackCurrent !== undefined && (
-                  <div className="rounded-xl border border-sky-100 bg-blue-50/30 p-4 text-sm shadow-sm shadow-slate-100">
+                  <div className="rounded-2xl bg-slate-50 p-4 text-sm">
                     <div className="mb-3 flex items-center gap-2">
                       <Truck className="h-5 w-5 text-sky-600" aria-hidden />
                       <span className="font-bold text-slate-800">Трек доставки</span>
                     </div>
-                    <div className="space-y-3 border-l border-slate-200 pl-3">
+                    <div className="space-y-3 border-l border-slate-200 pl-4">
                       {product.trackSteps.map((step, idx) => {
                         const isActive = idx === product.trackCurrent
                         const isCompleted = idx < product.trackCurrent!
                         return (
                           <div key={idx} className="flex items-center gap-3">
                             <span
-                              className={`-ml-[19px] flex h-3 w-3 rounded-full ring-4 ring-blue-50/80 ${
+                              className={`-ml-[23px] flex h-3.5 w-3.5 rounded-full ring-4 ring-slate-50 ${
                                 isActive
                                   ? 'animate-pulse bg-emerald-500'
                                   : isCompleted
@@ -803,7 +796,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div className={`rounded-xl border p-4 ${analyticsToneClass}`}>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-emerald-950">
                   <button
                     type="button"
                     onClick={() => toggleAnalytics(product.id)}
@@ -882,7 +875,7 @@ export default function App() {
                   </div>
                   <p
                     className={`mt-4 text-center text-xl font-bold ${
-                      hasDiscount ? 'text-emerald-700' : 'text-slate-900'
+                      hasDiscount ? 'text-emerald-700' : 'text-slate-800'
                     }`}
                   >
                     Итого за {formatVolumeLabel(product, volume)}:{' '}
@@ -898,11 +891,11 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => addToCart(product)}
-                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-4 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
+                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
                     justAdded
                       ? 'bg-emerald-700 text-white shadow-emerald-700/20'
                       : inCart
-                        ? 'border-2 border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50'
+                        ? 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
                         : 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
                   }`}
                 >
