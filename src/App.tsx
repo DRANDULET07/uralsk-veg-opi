@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpDown,
   CalendarCheck,
@@ -385,6 +385,31 @@ export default function App() {
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
   )
+  const [filtersVisible, setFiltersVisible] = useState(true)
+  const lastScrollY = useRef(0)
+
+  useEffect(() => {
+    lastScrollY.current = window.scrollY
+
+    const handleScroll = () => {
+      const currentY = window.scrollY
+      const delta = currentY - lastScrollY.current
+
+      if (Math.abs(delta) < 20) return
+      if (currentY <= 0) {
+        setFiltersVisible(true)
+      } else if (delta > 0 && currentY > 100) {
+        setFiltersVisible(false)
+      } else if (delta < 0) {
+        setFiltersVisible(true)
+      }
+
+      lastScrollY.current = currentY
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
@@ -454,9 +479,14 @@ export default function App() {
     window.setTimeout(() => setRepeatedOrderId(null), 1800)
   }
 
+  const clearCart = () => {
+    setCart({})
+  }
+
   const handleBookCart = () => {
     if (cartLines.length === 0) return
     openCartWhatsApp(cartLines, cartGrandTotal)
+    clearCart()
   }
 
   return (
@@ -502,7 +532,13 @@ export default function App() {
         </div>
       </header>
 
-      <div className="sticky top-[calc(7.25rem+env(safe-area-inset-top))] z-20 border-b border-slate-200 bg-white px-3 py-3 shadow-sm">
+      <div
+        className={`sticky top-[calc(7.25rem+env(safe-area-inset-top))] z-20 bg-white px-3 transition-all duration-300 ${
+          filtersVisible
+            ? 'border-b border-slate-200 py-3 shadow-sm opacity-100'
+            : 'border-transparent py-0 opacity-0'
+        } overflow-hidden`}
+      >
         <label className="relative block">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -829,14 +865,23 @@ export default function App() {
                   {cartCount === 1 ? 'позиция' : cartCount < 5 ? 'позиции' : 'позиций'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setCartOpen(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
-                aria-label="Закрыть корзину"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clearCart}
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  Очистить всё
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCartOpen(false)}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                  aria-label="Закрыть корзину"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
