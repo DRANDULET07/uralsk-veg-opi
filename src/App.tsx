@@ -381,6 +381,7 @@ export default function App() {
   const [cartOpen, setCartOpen] = useState(false)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
+  const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
   const [cart, setCart] = useState<Cart>({})
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
@@ -477,6 +478,10 @@ export default function App() {
     }))
     setRepeatedOrderId(order.id)
     window.setTimeout(() => setRepeatedOrderId(null), 1800)
+  }
+
+  const toggleAnalytics = (productId: string) => {
+    setAnalyticsOpenId((current) => (current === productId ? null : productId))
   }
 
   const clearCart = () => {
@@ -733,6 +738,69 @@ export default function App() {
                   )}
                   {product.location}
                 </p>
+
+                {product.availability === 'transit' && (
+                  <div className="mt-3 rounded-3xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="mb-2 flex items-center gap-2 text-slate-600">
+                      <Truck className="h-4 w-4 text-sky-600" aria-hidden />
+                      <span className="font-semibold text-slate-800">Трек доставки</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                        <span className="text-[11px] text-slate-500">Отгружено (Ташкент)</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="relative flex h-2.5 w-2.5 items-center justify-center">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-600" />
+                        </span>
+                        <span className="font-semibold text-slate-800">Граница (КПП Маштаково)</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-2.5 w-2.5 rounded-full bg-slate-300" />
+                        <span className="text-[11px] text-slate-500">Склад №1 (Уральск)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-3xl border border-slate-200 bg-emerald-50/70 p-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleAnalytics(product.id)}
+                    className="flex w-full items-center justify-between gap-3 rounded-3xl bg-white px-3 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100"
+                  >
+                    <span>
+                      {product.statusTone === 'transit'
+                        ? '📈 Прогноз: ожидается подорожание к концу недели'
+                        : '📊 Аналитика рынка: цена стабильна'}
+                    </span>
+                    <span className="text-xs text-emerald-700">
+                      {analyticsOpenId === product.id ? 'Скрыть' : 'Подробнее'}
+                    </span>
+                  </button>
+
+                  {analyticsOpenId === product.id && (
+                    <div className="mt-3 space-y-3 rounded-3xl bg-slate-50 p-3 text-sm text-slate-600">
+                      <div className="grid grid-cols-7 gap-1">
+                        {[30, 45, 40, 55, 50, 60, 70].map((height, index) => (
+                          <div
+                            key={index}
+                            className={`mx-auto h-12 w-full rounded-full ${
+                              index === 6 ? 'bg-emerald-700' : 'bg-emerald-400/90'
+                            }`}
+                            style={{ height: `${height}%` }}
+                          />
+                        ))}
+                      </div>
+                      <p>
+                        Рекомендуем зафиксировать объемы. Из-за задержек на границе прогнозируется дефицит
+                        лука в Уральске на следующей неделе.
+                      </p>
+                    </div>
+                  )}
+                </div>
 
                 <div className="rounded-xl bg-slate-50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
