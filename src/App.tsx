@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  ArrowUpDown,
   CalendarCheck,
   CheckCircle2,
   Leaf,
@@ -18,6 +19,8 @@ const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
 
 type TabId = 'all' | 'warehouse' | 'transit'
 type UnitMode = 'tons' | 'kg'
+type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
+type SortOption = 'default' | 'price-asc' | 'price-desc'
 
 interface Product {
   id: string
@@ -148,6 +151,18 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'transit', label: 'Товар в пути' },
 ]
 
+const WAREHOUSE_FILTERS: { id: WarehouseFilterId; label: string }[] = [
+  { id: 'all', label: 'Все склады' },
+  { id: 'warehouse1', label: 'Склад №1 (Уральск)' },
+  { id: 'warehouse2', label: 'Склад №2 (Охлаждаемый)' },
+]
+
+const SORT_OPTIONS: { id: SortOption; label: string }[] = [
+  { id: 'default', label: 'По умолчанию' },
+  { id: 'price-asc', label: 'По цене ↑' },
+  { id: 'price-desc', label: 'По цене ↓' },
+]
+
 const MOCK_ORDERS: MockOrder[] = [
   {
     id: '1024',
@@ -250,6 +265,34 @@ function matchesSearch(product: Product, query: string): boolean {
   return haystack.includes(query)
 }
 
+function getProductWarehouseId(product: Product): WarehouseFilterId | 'transit' {
+  if (product.availability === 'transit') return 'transit'
+  if (product.location.startsWith('Склад №1')) return 'warehouse1'
+  if (product.location.startsWith('Склад №2')) return 'warehouse2'
+  return 'transit'
+}
+
+function matchesWarehouse(product: Product, warehouse: WarehouseFilterId): boolean {
+  if (warehouse === 'all') return true
+  return getProductWarehouseId(product) === warehouse
+}
+
+function matchesInStockOnly(product: Product, onlyInStock: boolean): boolean {
+  if (!onlyInStock) return true
+  return product.availability === 'warehouse'
+}
+
+function sortProducts(products: Product[], sortBy: SortOption): Product[] {
+  if (sortBy === 'default') return products
+  const sorted = [...products]
+  if (sortBy === 'price-asc') {
+    sorted.sort((a, b) => a.basePrice - b.basePrice)
+  } else {
+    sorted.sort((a, b) => b.basePrice - a.basePrice)
+  }
+  return sorted
+}
+
 const statusToneClass: Record<Product['statusTone'], string> = {
   fresh: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   stock: 'bg-amber-50 text-amber-900 border-amber-200',
@@ -260,6 +303,9 @@ export default function App() {
   const today = useMemo(() => formatDateRu(new Date()), [])
   const [activeTab, setActiveTab] = useState<TabId>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilterId>('all')
+  const [onlyInStock, setOnlyInStock] = useState(false)
+  const [sortBy, setSortBy] = useState<SortOption>('default')
   const [profileOpen, setProfileOpen] = useState(false)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
@@ -268,13 +314,22 @@ export default function App() {
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
-  const filteredProducts = useMemo(
-    () =>
-      PRODUCTS.filter(
-        (p) => matchesTab(p, activeTab) && matchesSearch(p, normalizedSearch),
-      ),
-    [activeTab, normalizedSearch],
-  )
+  const filteredProducts = useMemo(() => {
+    const list = PRODUCTS.filter(
+      (p) =>
+        matchesTab(p, activeTab) &&
+        matchesSearch(p, normalizedSearch) &&
+        matchesWarehouse(p, warehouseFilter) &&
+        matchesInStockOnly(p, onlyInStock),
+    )
+    return sortProducts(list, sortBy)
+  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, sortBy])
+
+  const hasActiveFilters =
+    normalizedSearch.length > 0 ||
+    warehouseFilter !== 'all' ||
+    onlyInStock ||
+    sortBy !== 'default'
 
   const setProductVolume = (product: Product, raw: number) => {
     setVolumes((prev) => ({
@@ -355,6 +410,58 @@ export default function App() {
           )}
         </label>
 
+        <div
+          className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5"
+          aria-label="Расширенные фильтры"
+        >
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
+            <select
+              value={warehouseFilter}
+              onChange={(e) => setWarehouseFilter(e.target.value as WarehouseFilterId)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+              aria-label="Фильтр по складу"
+            >
+              {WAREHOUSE_FILTERS.map((wh) => (
+                <option key={wh.id} value={wh.id}>
+                  {wh.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOnlyInStock((v) => !v)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.98] ${
+                onlyInStock
+                  ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
+              }`}
+              aria-pressed={onlyInStock}
+            >
+              Только в наличии
+            </button>
+
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                aria-label="Сортировка по цене"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
         <nav className="mt-3" aria-label="Фильтр ассортимента">
           <div className="flex gap-2 overflow-x-auto scrollbar-none">
             {TABS.map((tab) => (
@@ -379,8 +486,10 @@ export default function App() {
         {filteredProducts.length === 0 && (
           <p className="rounded-xl bg-white p-6 text-center text-slate-500">
             {normalizedSearch
-              ? `По запросу «${searchQuery.trim()}» ничего не найдено. Попробуйте другое название или смените вкладку.`
-              : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
+              ? `По запросу «${searchQuery.trim()}» ничего не найдено.`
+              : hasActiveFilters
+                ? 'По выбранным фильтрам позиций нет. Измените склад, вкладку или снимите «Только в наличии».'
+                : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
           </p>
         )}
 
