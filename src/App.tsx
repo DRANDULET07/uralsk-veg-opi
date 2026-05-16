@@ -44,6 +44,11 @@ interface Product {
   sliderMax: number
   sliderStep: number
   defaultVolume: number
+  analyticsTitle: string
+  analyticsText: string
+  trackStatus?: null
+  trackSteps?: string[]
+  trackCurrent?: number
 }
 
 interface CartLine {
@@ -81,6 +86,9 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 5,
+    analyticsTitle: '📊 Аналитика рынка: цена стабильна',
+    analyticsText: 'На рынке Уральска стабильный объем местного картофеля. В ближайшие 2 недели ценовых скачков не ожидается, запасы на складе в избытке.',
+    trackStatus: null,
   },
   {
     id: 'onion',
@@ -99,6 +107,9 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 3,
+    analyticsTitle: '📉 Скидки: сезонное снижение цены',
+    analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные B2B условия.',
+    trackStatus: null,
   },
   {
     id: 'carrot',
@@ -117,6 +128,10 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 4,
+    analyticsTitle: '📈 Прогноз: ожидается подорожание к концу недели',
+    analyticsText: 'Из-за задержек крупных фур на КПП Маштаково прогнозируется временный дефицит свежей моркови. Рекомендуем зафиксировать объемы.',
+    trackSteps: ['Отгружено (Ташкент)', 'Граница (КПП Маштаково)', 'Склад №1 (Уральск)'],
+    trackCurrent: 1,
   },
   {
     id: 'tomato',
@@ -135,6 +150,9 @@ const PRODUCTS: Product[] = [
     sliderMax: 5000,
     sliderStep: 100,
     defaultVolume: 1500,
+    analyticsTitle: '📊 Аналитика: высокий спрос',
+    analyticsText: 'Тепличные томаты пользуются повышенным спросом перед выходными. Объемы на Складе №2 (Охлаждаемый) тают быстро, планируйте закуп заранее.',
+    trackStatus: null,
   },
   {
     id: 'cabbage',
@@ -153,6 +171,9 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 2,
+    analyticsTitle: '📊 Аналитика рынка: цена стабильна',
+    analyticsText: 'Белокочанная капуста зафиксировалась в цене. Качество партии отличное, листы плотные, товар готов к длительной транспортировке.',
+    trackStatus: null,
   },
 ]
 
@@ -659,11 +680,19 @@ export default function App() {
           const unit = getVolumeUnit(product)
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
+          const analyticsToneClass =
+            product.statusTone === 'transit'
+              ? 'border-amber-200/70 bg-amber-50 text-amber-900'
+              : 'border-slate-200/80 bg-slate-50 text-slate-800'
+          const analyticsActionClass =
+            product.statusTone === 'transit'
+              ? 'bg-white/70 text-amber-700/80'
+              : 'bg-white text-slate-500'
 
           return (
             <article
               key={product.id}
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-lg shadow-slate-200/70"
             >
               <div className="group relative aspect-[16/10] w-full overflow-hidden bg-slate-200">
                 <img
@@ -685,7 +714,7 @@ export default function App() {
                 )}
               </div>
 
-              <div className="space-y-3 p-4">
+              <div className="space-y-4 p-5">
                 <div
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium ${statusToneClass[product.statusTone]}`}
                 >
@@ -739,72 +768,65 @@ export default function App() {
                   {product.location}
                 </p>
 
-                {product.availability === 'transit' && (
-                  <div className="mt-3 rounded-3xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                    <div className="mb-2 flex items-center gap-2 text-slate-600">
-                      <Truck className="h-4 w-4 text-sky-600" aria-hidden />
-                      <span className="font-semibold text-slate-800">Трек доставки</span>
+                {product.trackSteps && product.trackCurrent !== undefined && (
+                  <div className="rounded-xl border border-sky-100 bg-blue-50/30 p-4 text-sm shadow-sm shadow-slate-100">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Truck className="h-5 w-5 text-sky-600" aria-hidden />
+                      <span className="font-bold text-slate-800">Трек доставки</span>
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                        <span className="text-[11px] text-slate-500">Отгружено (Ташкент)</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="relative flex h-2.5 w-2.5 items-center justify-center">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
-                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-600" />
-                        </span>
-                        <span className="font-semibold text-slate-800">Граница (КПП Маштаково)</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-2.5 w-2.5 rounded-full bg-slate-300" />
-                        <span className="text-[11px] text-slate-500">Склад №1 (Уральск)</span>
-                      </div>
+                    <div className="space-y-3 border-l border-slate-200 pl-3">
+                      {product.trackSteps.map((step, idx) => {
+                        const isActive = idx === product.trackCurrent
+                        const isCompleted = idx < product.trackCurrent!
+                        return (
+                          <div key={idx} className="flex items-center gap-3">
+                            <span
+                              className={`-ml-[19px] flex h-3 w-3 rounded-full ring-4 ring-blue-50/80 ${
+                                isActive
+                                  ? 'animate-pulse bg-emerald-500'
+                                  : isCompleted
+                                    ? 'bg-emerald-500'
+                                    : 'bg-slate-300'
+                              }`}
+                            />
+                            <span
+                              className={`text-sm ${
+                                isActive ? 'font-bold text-slate-800' : 'text-slate-600'
+                              }`}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
 
-                <div className="mt-4 rounded-3xl border border-slate-200 bg-emerald-50/70 p-3">
+                <div className={`rounded-xl border p-4 ${analyticsToneClass}`}>
                   <button
                     type="button"
                     onClick={() => toggleAnalytics(product.id)}
-                    className="flex w-full items-center justify-between gap-3 rounded-3xl bg-white px-3 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100"
+                    className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold transition"
                   >
-                    <span>
-                      {product.statusTone === 'transit'
-                        ? '📈 Прогноз: ожидается подорожание к концу недели'
-                        : '📊 Аналитика рынка: цена стабильна'}
-                    </span>
-                    <span className="text-xs text-emerald-700">
+                    <span>{product.analyticsTitle}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${analyticsActionClass}`}>
                       {analyticsOpenId === product.id ? 'Скрыть' : 'Подробнее'}
                     </span>
                   </button>
 
                   {analyticsOpenId === product.id && (
-                    <div className="mt-3 space-y-3 rounded-3xl bg-slate-50 p-3 text-sm text-slate-600">
-                      <div className="grid grid-cols-7 gap-1">
-                        {[30, 45, 40, 55, 50, 60, 70].map((height, index) => (
-                          <div
-                            key={index}
-                            className={`mx-auto h-12 w-full rounded-full ${
-                              index === 6 ? 'bg-emerald-700' : 'bg-emerald-400/90'
-                            }`}
-                            style={{ height: `${height}%` }}
-                          />
-                        ))}
-                      </div>
-                      <p>
-                        Рекомендуем зафиксировать объемы. Из-за задержек на границе прогнозируется дефицит
-                        лука в Уральске на следующей неделе.
-                      </p>
+                    <div className="mt-3 rounded-lg bg-white/60 p-3 text-sm leading-relaxed">
+                      <p>{product.analyticsText}</p>
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-slate-700">
+                <hr className="border-gray-100" />
+
+                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-700">
                       Объём закупки
                     </span>
                     <div className="flex items-center gap-1.5">
@@ -829,7 +851,7 @@ export default function App() {
                             setProductVolume(product, parsed)
                           }
                         }}
-                        className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-brand-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                        className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                         aria-label={`Объём закупки в ${unit}`}
                       />
                       <span className="text-sm font-semibold text-slate-500">{unit}</span>
@@ -842,6 +864,7 @@ export default function App() {
                     step={product.sliderStep}
                     value={volume}
                     onChange={(e) => setProductVolume(product, Number(e.target.value))}
+                    className="w-full accent-emerald-600"
                     aria-label={`Ползунок объёма: ${product.name}`}
                   />
                   <div className="mt-1 flex justify-between text-[11px] text-slate-400">
@@ -858,15 +881,15 @@ export default function App() {
                     </span>
                   </div>
                   <p
-                    className={`mt-3 text-center text-lg font-bold ${
-                      hasDiscount ? 'text-brand-700' : 'text-slate-800'
+                    className={`mt-4 text-center text-xl font-bold ${
+                      hasDiscount ? 'text-emerald-700' : 'text-slate-900'
                     }`}
                   >
                     Итого за {formatVolumeLabel(product, volume)}:{' '}
                     <span className="tabular-nums">{formatMoney(total)} ₸</span>
                   </p>
                   {hasDiscount && (
-                    <p className="mt-1 text-center text-xs font-medium text-brand-600">
+                    <p className="mt-1 text-center text-xs font-medium text-emerald-600">
                       Прогрессивный опт: выгода {discount.toFixed(1)}% от базовой цены
                     </p>
                   )}
@@ -875,12 +898,12 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => addToCart(product)}
-                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] ${
+                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-4 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
                     justAdded
-                      ? 'bg-brand-800 text-white'
+                      ? 'bg-emerald-700 text-white shadow-emerald-700/20'
                       : inCart
-                        ? 'border-2 border-brand-600 bg-white text-brand-700 hover:bg-brand-50'
-                        : 'bg-brand-700 text-white hover:bg-brand-800'
+                        ? 'border-2 border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50'
+                        : 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
                   }`}
                 >
                   <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
