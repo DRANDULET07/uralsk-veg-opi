@@ -6,9 +6,12 @@ import {
   Leaf,
   MapPin,
   Package,
+  Plus,
   RotateCcw,
   Scale,
   Search,
+  ShoppingCart,
+  Trash2,
   Truck,
   User,
   X,
@@ -21,6 +24,7 @@ type TabId = 'all' | 'warehouse' | 'transit'
 type UnitMode = 'tons' | 'kg'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
 type SortOption = 'default' | 'price-asc' | 'price-desc'
+type Cart = Record<string, number>
 
 interface Product {
   id: string
@@ -40,6 +44,13 @@ interface Product {
   sliderMax: number
   sliderStep: number
   defaultVolume: number
+}
+
+interface CartLine {
+  product: Product
+  volume: number
+  total: number
+  volumeLabel: string
 }
 
 interface MockOrder {
@@ -237,6 +248,14 @@ function formatVolumeLabel(product: Product, volume: number): string {
   return `${formatMoney(volume)} кг`
 }
 
+function formatVolumeWhatsApp(product: Product, volume: number): string {
+  if (product.unitMode === 'tons') {
+    const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
+    return `${label} тонн`
+  }
+  return `${formatMoney(volume)} кг`
+}
+
 function formatOrderVolume(product: Product, volume: number): string {
   if (product.unitMode === 'tons') {
     const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
@@ -251,6 +270,58 @@ function calcPricing(product: Product, volume: number) {
   const pricePerKg = product.basePrice * (1 - discount / 100)
   const total = weightKg * pricePerKg
   return { weightKg, discount, pricePerKg, total }
+}
+
+function getCartLines(cart: Cart): CartLine[] {
+  return Object.entries(cart)
+    .map(([productId, volume]) => {
+      const product = PRODUCTS.find((p) => p.id === productId)
+      if (!product) return null
+      const { total } = calcPricing(product, volume)
+      return {
+        product,
+        volume,
+        total,
+        volumeLabel: formatVolumeLabel(product, volume),
+      }
+    })
+    .filter((line): line is CartLine => line !== null)
+}
+
+function getCartTotalTons(lines: CartLine[]): number {
+  return lines.reduce((sum, line) => {
+    if (line.product.unitMode === 'tons') return sum + line.volume
+    return sum
+  }, 0)
+}
+
+function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number): string {
+  const itemLines = lines.map(
+    (line) =>
+      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume)} (Итого: ${formatMoney(line.total)} ₸)`,
+  )
+  const totalTons = getCartTotalTons(lines)
+  const tonsLabel =
+    totalTons > 0
+      ? `${Number.isInteger(totalTons) ? totalTons : totalTons.toFixed(1)} тонн`
+      : null
+
+  const summary = tonsLabel
+    ? `Всего: ${tonsLabel} на общую сумму ${formatMoney(grandTotal)} ₸.`
+    : `Общая сумма заказа: ${formatMoney(grandTotal)} ₸.`
+
+  return [
+    'Здравствуйте! Хочу забронировать овощи:',
+    ...itemLines,
+    summary,
+    `Мой номер в системе: ${PROFILE_PHONE}`,
+  ].join('\n')
+}
+
+function openCartWhatsApp(lines: CartLine[], grandTotal: number) {
+  const text = buildCartWhatsAppMessage(lines, grandTotal)
+  const url = `https://api.whatsapp.com/send?phone=${WHATSAPP_PHONE}&text=${encodeURIComponent(text)}`
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function matchesTab(product: Product, tab: TabId): boolean {
@@ -307,7 +378,10 @@ export default function App() {
   const [onlyInStock, setOnlyInStock] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [profileOpen, setProfileOpen] = useState(false)
+  const [cartOpen, setCartOpen] = useState(false)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
+  const [addedProductId, setAddedProductId] = useState<string | null>(null)
+  const [cart, setCart] = useState<Cart>({})
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
   )
@@ -325,6 +399,13 @@ export default function App() {
     return sortProducts(list, sortBy)
   }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, sortBy])
 
+  const cartLines = useMemo(() => getCartLines(cart), [cart])
+  const cartCount = cartLines.length
+  const cartGrandTotal = useMemo(
+    () => cartLines.reduce((sum, line) => sum + line.total, 0),
+    [cartLines],
+  )
+
   const hasActiveFilters =
     normalizedSearch.length > 0 ||
     warehouseFilter !== 'all' ||
@@ -338,11 +419,26 @@ export default function App() {
     }))
   }
 
-  const getWhatsAppUrl = (product: Product) => {
-    const volume = volumes[product.id] ?? product.defaultVolume
-    const volumeLabel = formatVolumeLabel(product, volume)
-    const text = `Здравствуйте! Хочу забронировать: ${product.name}, объём ${volumeLabel}.`
-    return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
+  const addToCart = (product: Product) => {
+    const selected = volumes[product.id] ?? product.defaultVolume
+    setCart((prev) => {
+      const current = prev[product.id] ?? 0
+      const nextVolume = current > 0 ? current + selected : selected
+      return {
+        ...prev,
+        [product.id]: snapVolume(nextVolume, product),
+      }
+    })
+    setAddedProductId(product.id)
+    window.setTimeout(() => setAddedProductId(null), 1500)
+  }
+
+  const removeFromCart = (productId: string) => {
+    setCart((prev) => {
+      const next = { ...prev }
+      delete next[productId]
+      return next
+    })
   }
 
   const handleRepeatOrder = (order: MockOrder) => {
@@ -350,12 +446,21 @@ export default function App() {
     if (!product) return
 
     setProductVolume(product, order.volume)
+    setCart((prev) => ({
+      ...prev,
+      [product.id]: snapVolume(order.volume, product),
+    }))
     setRepeatedOrderId(order.id)
     window.setTimeout(() => setRepeatedOrderId(null), 1800)
   }
 
+  const handleBookCart = () => {
+    if (cartLines.length === 0) return
+    openCartWhatsApp(cartLines, cartGrandTotal)
+  }
+
   return (
-    <div className="mx-auto min-h-dvh max-w-md bg-slate-100 pb-8">
+    <div className="mx-auto min-h-dvh max-w-md bg-slate-100 pb-24">
       <header className="sticky top-0 z-30 border-b border-brand-800/20 bg-brand-900 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] text-white shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -367,6 +472,19 @@ export default function App() {
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
+              aria-label={`Корзина: ${cartCount} позиций`}
+            >
+              <ShoppingCart className="h-5 w-5" strokeWidth={2} />
+              {cartCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white shadow-md">
+                  {cartCount}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setProfileOpen(true)}
@@ -498,6 +616,8 @@ export default function App() {
           const { discount, pricePerKg, total } = calcPricing(product, volume)
           const hasDiscount = discount > 0
           const unit = getVolumeUnit(product)
+          const inCart = product.id in cart
+          const justAdded = addedProductId === product.id
 
           return (
             <article
@@ -517,6 +637,11 @@ export default function App() {
                   <p className="text-xs font-medium text-white/90">{product.subtitle}</p>
                   <h2 className="text-2xl font-bold text-white">{product.name}</h2>
                 </div>
+                {inCart && (
+                  <span className="absolute right-3 top-3 rounded-full bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
+                    В корзине
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3 p-4">
@@ -643,14 +768,20 @@ export default function App() {
                   )}
                 </div>
 
-                <a
-                  href={getWhatsAppUrl(product)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 text-base font-bold text-white shadow-md transition active:scale-[0.98] hover:bg-[#1ebe5d]"
+                <button
+                  type="button"
+                  onClick={() => addToCart(product)}
+                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] ${
+                    justAdded
+                      ? 'bg-brand-800 text-white'
+                      : inCart
+                        ? 'border-2 border-brand-600 bg-white text-brand-700 hover:bg-brand-50'
+                        : 'bg-brand-700 text-white hover:bg-brand-800'
+                  }`}
                 >
-                  Забронировать партию в WhatsApp
-                </a>
+                  <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
+                  {justAdded ? 'Добавлено!' : inCart ? 'Добавить ещё в корзину' : 'Добавить в корзину'}
+                </button>
               </div>
             </article>
           )
@@ -660,6 +791,114 @@ export default function App() {
       <footer className="px-4 pt-6 text-center text-xs text-slate-500">
         B2B-витрина · Уральск, Казахстан · Оптовые цены в тенге (₸)
       </footer>
+
+      {cartCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setCartOpen(true)}
+          className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-xl transition hover:bg-brand-800 active:scale-95"
+          aria-label={`Открыть корзину: ${cartCount} позиций`}
+        >
+          <ShoppingCart className="h-6 w-6" strokeWidth={2} />
+          <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold shadow-md">
+            {cartCount}
+          </span>
+        </button>
+      )}
+
+      {cartOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cart-modal-title"
+          onClick={() => setCartOpen(false)}
+        >
+          <div
+            className="flex max-h-[min(92dvh,720px)] w-full max-w-md animate-[slideUp_0.3s_ease-out] flex-col rounded-t-3xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-200" aria-hidden />
+            <div className="flex items-start justify-between border-b border-slate-100 px-5 pb-4 pt-3">
+              <div>
+                <h3 id="cart-modal-title" className="text-lg font-bold text-brand-900">
+                  Ваш оптовый заказ
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {cartCount}{' '}
+                  {cartCount === 1 ? 'позиция' : cartCount < 5 ? 'позиции' : 'позиций'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCartOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                aria-label="Закрыть корзину"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {cartLines.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-500">
+                  Корзина пуста. Добавьте овощи из каталога.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {cartLines.map((line) => (
+                    <li
+                      key={line.product.id}
+                      className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    >
+                      <img
+                        src={line.product.image}
+                        alt=""
+                        className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-800">{line.product.name}</p>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(line.product.id)}
+                            className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                            aria-label={`Удалить ${line.product.name} из корзины`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
+                        <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
+                          {formatMoney(line.total)} ₸
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {cartLines.length > 0 && (
+              <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+                <p className="mb-3 text-center text-lg font-bold text-slate-800">
+                  Итого к оплате:{' '}
+                  <span className="tabular-nums text-brand-800">
+                    {formatMoney(cartGrandTotal)} ₸
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={handleBookCart}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
+                >
+                  Забронировать всё в WhatsApp
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {profileOpen && (
         <div
@@ -744,7 +983,7 @@ export default function App() {
                             className={`h-4 w-4 ${isRepeated ? 'animate-spin' : ''}`}
                             aria-hidden
                           />
-                          {isRepeated ? 'Объём подставлен в каталог' : 'Повторить заказ'}
+                          {isRepeated ? 'Добавлено в корзину' : 'Повторить заказ'}
                         </button>
                       </li>
                     )
