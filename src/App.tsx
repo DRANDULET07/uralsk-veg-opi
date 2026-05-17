@@ -411,22 +411,29 @@ export default function App() {
   const lastScrollY = useRef(0)
 
   useEffect(() => {
-    lastScrollY.current = window.scrollY
+    const threshold = 10
+    const topOffset = 110
 
     const handleScroll = () => {
-      const currentY = window.scrollY
-      const delta = currentY - lastScrollY.current
+      const currentScrollY = window.scrollY
 
-      if (Math.abs(delta) < 20) return
-      if (currentY <= 0) {
-        setFiltersVisible(true)
-      } else if (delta > 0 && currentY > 100) {
-        setFiltersVisible(false)
-      } else if (delta < 0) {
-        setFiltersVisible(true)
+      if (currentScrollY < topOffset) {
+        setFiltersVisible((visible) => (visible ? visible : true))
+        lastScrollY.current = currentScrollY
+        return
       }
 
-      lastScrollY.current = currentY
+      if (Math.abs(currentScrollY - lastScrollY.current) < threshold) {
+        return
+      }
+
+      if (currentScrollY > lastScrollY.current) {
+        setFiltersVisible((visible) => (visible ? false : visible))
+      } else {
+        setFiltersVisible((visible) => (visible ? visible : true))
+      }
+
+      lastScrollY.current = currentScrollY
     }
 
     window.addEventListener('scroll', handleScroll, { passive: true })
