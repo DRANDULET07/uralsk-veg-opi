@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpDown,
   CalendarCheck,
@@ -45,6 +45,7 @@ interface Product {
   sliderMax: number
   sliderStep: number
   defaultVolume: number
+  retailStockKg?: number
   analyticsTitle: string
   analyticsText: string
   trackStatus?: null
@@ -88,6 +89,7 @@ interface MockOrder {
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
+const RETAIL_MIN_ORDER_KG = 5
 
 const PRODUCTS: Product[] = [
   {
@@ -107,6 +109,7 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 5,
+    retailStockKg: 42,
     analyticsTitle: '📊 Аналитика рынка: цена стабильна',
     analyticsText: 'На рынке Уральска стабильный объем местного картофеля. В ближайшие 2 недели ценовых скачков не ожидается, запасы на складе в избытке.',
     trackStatus: null,
@@ -128,6 +131,7 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 3,
+    retailStockKg: 38,
     analyticsTitle: '📉 Скидки: сезонное снижение цены',
     analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные оптовые условия.',
     trackStatus: null,
@@ -149,6 +153,7 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 4,
+    retailStockKg: 25,
     analyticsTitle: '📈 Прогноз: ожидается подорожание к концу недели',
     analyticsText: 'Из-за задержек крупных фур на КПП Маштаково прогнозируется временный дефицит свежей моркови. Рекомендуем зафиксировать объемы.',
     trackSteps: ['Отгружено (Ташкент)', 'Граница (КПП Маштаково)', 'Склад №1 (Уральск)'],
@@ -171,6 +176,7 @@ const PRODUCTS: Product[] = [
     sliderMax: 5000,
     sliderStep: 100,
     defaultVolume: 1500,
+    retailStockKg: 50,
     analyticsTitle: '📊 Аналитика: высокий спрос',
     analyticsText: 'Тепличные томаты пользуются повышенным спросом перед выходными. Объемы на Складе №2 (Охлаждаемый) тают быстро, планируйте закуп заранее.',
     trackStatus: null,
@@ -192,6 +198,7 @@ const PRODUCTS: Product[] = [
     sliderMax: 20,
     sliderStep: 0.5,
     defaultVolume: 2,
+    retailStockKg: 44,
     analyticsTitle: '📊 Аналитика рынка: цена стабильна',
     analyticsText: 'Белокочанная капуста зафиксировалась в цене. Качество партии отличное, листы плотные, товар готов к длительной транспортировке.',
     trackStatus: null,
@@ -283,7 +290,7 @@ function getProductDisplayConfig(product: Product, isB2B: boolean) {
 
   return {
     unitMode: 'kg' as const,
-    sliderMin: 5,
+    sliderMin: RETAIL_MIN_ORDER_KG,
     sliderMax: 50,
     sliderStep: 1,
     defaultVolume: 10,
@@ -441,6 +448,108 @@ const statusToneClass: Record<Product['statusTone'], string> = {
   transit: 'bg-sky-50 text-sky-900 border-sky-200',
 }
 
+interface RetailQuantityInputProps {
+  value: number
+  stock: number
+  min?: number
+  productName: string
+  onChange: (value: number) => void
+}
+
+function normalizeRetailQuantity(value: number, min: number, stock: number): number {
+  if (!Number.isFinite(value)) return Math.min(min, stock)
+  const rounded = Math.round(value)
+  return Math.min(stock, Math.max(min, rounded))
+}
+
+function RetailQuantityInput({
+  value,
+  stock,
+  min = RETAIL_MIN_ORDER_KG,
+  productName,
+  onChange,
+}: RetailQuantityInputProps) {
+  const [draft, setDraft] = useState(String(value))
+  const maxStock = Math.max(0, Math.floor(stock))
+  const canDecrease = value > min
+  const canIncrease = value < maxStock
+
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  const commitValue = (nextValue: number) => {
+    const normalized = normalizeRetailQuantity(nextValue, min, maxStock)
+    setDraft(String(normalized))
+    onChange(normalized)
+  }
+
+  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextDraft = event.target.value.replace(/[^\d]/g, '')
+
+    if (nextDraft === '') {
+      setDraft('')
+      return
+    }
+
+    const parsed = Number(nextDraft)
+    if (parsed > maxStock) {
+      commitValue(maxStock)
+      return
+    }
+
+    setDraft(nextDraft)
+    if (parsed >= min) {
+      onChange(parsed)
+    }
+  }
+
+  const handleBlur = () => {
+    if (draft === '') {
+      commitValue(min)
+      return
+    }
+
+    commitValue(Number(draft))
+  }
+
+  return (
+    <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <button
+        type="button"
+        onClick={() => commitValue(value - 1)}
+        disabled={!canDecrease}
+        className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+        aria-label={`Уменьшить вес ${productName} на 1 кг`}
+      >
+        <Minus className="h-5 w-5" aria-hidden />
+      </button>
+      <label className="flex min-w-0 items-center justify-center border-x border-slate-200 px-2">
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={draft}
+          onChange={handleInputChange}
+          onBlur={handleBlur}
+          className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none"
+          aria-label={`Вес покупки в килограммах: ${productName}`}
+        />
+        <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
+      </label>
+      <button
+        type="button"
+        onClick={() => commitValue(value + 1)}
+        disabled={!canIncrease}
+        className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+        aria-label={`Увеличить вес ${productName} на 1 кг`}
+      >
+        <Plus className="h-5 w-5" aria-hidden />
+      </button>
+    </div>
+  )
+}
+
 function ProductSkeleton() {
   return (
     <article className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70">
@@ -556,14 +665,6 @@ export default function App() {
     setVolumes((prev) => ({
       ...prev,
       [product.id]: snapVolume(raw, product, isB2B),
-    }))
-  }
-
-  const changeRetailVolume = (product: Product, delta: number) => {
-    const current = volumes[product.id] ?? getProductDisplayConfig(product, false).defaultVolume
-    setVolumes((prev) => ({
-      ...prev,
-      [product.id]: snapVolume(current + delta, product, false),
     }))
   }
 
@@ -1084,53 +1185,18 @@ export default function App() {
                       {(() => {
                         const cfg = getProductDisplayConfig(product, false)
                         return (
-                          <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
-                            <button
-                              type="button"
-                              onClick={() => changeRetailVolume(product, -1)}
-                              disabled={volume <= cfg.sliderMin}
-                              className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
-                              aria-label={`Уменьшить вес ${product.name} на 1 кг`}
-                            >
-                              <Minus className="h-5 w-5" aria-hidden />
-                            </button>
-                            <label className="flex min-w-0 items-center justify-center border-x border-slate-200 px-2">
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min={cfg.sliderMin}
-                                max={cfg.sliderMax}
-                                step={1}
-                                value={volume}
-                                onChange={(e) => {
-                                  const parsed = Number(e.target.value)
-                                  if (!Number.isNaN(parsed)) {
-                                    setProductVolume(product, parsed)
-                                  }
-                                }}
-                                onBlur={(e) => {
-                                  const parsed = Number(e.target.value)
-                                  if (Number.isNaN(parsed) || e.target.value === '') {
-                                    setProductVolume(product, cfg.sliderMin)
-                                  } else {
-                                    setProductVolume(product, parsed)
-                                  }
-                                }}
-                                className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none"
-                                aria-label={`Вес покупки в килограммах: ${product.name}`}
-                              />
-                              <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => changeRetailVolume(product, 1)}
-                              disabled={volume >= cfg.sliderMax}
-                              className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
-                              aria-label={`Увеличить вес ${product.name} на 1 кг`}
-                            >
-                              <Plus className="h-5 w-5" aria-hidden />
-                            </button>
-                          </div>
+                          <RetailQuantityInput
+                            value={volume}
+                            min={cfg.sliderMin}
+                            stock={product.retailStockKg ?? cfg.sliderMax}
+                            productName={product.name}
+                            onChange={(nextVolume) => {
+                              setVolumes((prev) => ({
+                                ...prev,
+                                [product.id]: nextVolume,
+                              }))
+                            }}
+                          />
                         )
                       })()}
                     </>
