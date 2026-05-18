@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpDown,
   CalendarCheck,
   CheckCircle2,
   Leaf,
   MapPin,
+  Minus,
   Package,
   Plus,
   RotateCcw,
@@ -128,7 +129,7 @@ const PRODUCTS: Product[] = [
     sliderStep: 0.5,
     defaultVolume: 3,
     analyticsTitle: '📉 Скидки: сезонное снижение цены',
-    analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные B2B условия.',
+    analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные оптовые условия.',
     trackStatus: null,
   },
   {
@@ -284,7 +285,7 @@ function getProductDisplayConfig(product: Product, isB2B: boolean) {
     unitMode: 'kg' as const,
     sliderMin: 5,
     sliderMax: 50,
-    sliderStep: 5,
+    sliderStep: 1,
     defaultVolume: 10,
   }
 }
@@ -481,39 +482,6 @@ export default function App() {
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
   )
-  const [filtersVisible, setFiltersVisible] = useState(true)
-  const lastScrollY = useRef(0)
-
-  useEffect(() => {
-    const threshold = 10
-    const topOffset = 110
-
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY
-
-      if (currentScrollY < topOffset) {
-        setFiltersVisible((visible) => (visible ? visible : true))
-        lastScrollY.current = currentScrollY
-        return
-      }
-
-      if (Math.abs(currentScrollY - lastScrollY.current) < threshold) {
-        return
-      }
-
-      if (currentScrollY > lastScrollY.current) {
-        setFiltersVisible((visible) => (visible ? false : visible))
-      } else {
-        setFiltersVisible((visible) => (visible ? visible : true))
-      }
-
-      lastScrollY.current = currentScrollY
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
   useEffect(() => {
     const storedLastOrder = localStorage.getItem(LOCAL_STORAGE_LAST_ORDER)
     const storedHistory = localStorage.getItem(LOCAL_STORAGE_HISTORY)
@@ -545,6 +513,14 @@ export default function App() {
         PRODUCTS.map((product) => {
           const config = getProductDisplayConfig(product, isB2B)
           return [product.id, config.defaultVolume]
+        }),
+      ),
+    )
+    setCart((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([productId, volume]) => {
+          const product = PRODUCTS.find((p) => p.id === productId)
+          return [productId, product ? snapVolume(volume, product, isB2B) : volume]
         }),
       ),
     )
@@ -580,6 +556,14 @@ export default function App() {
     setVolumes((prev) => ({
       ...prev,
       [product.id]: snapVolume(raw, product, isB2B),
+    }))
+  }
+
+  const changeRetailVolume = (product: Product, delta: number) => {
+    const current = volumes[product.id] ?? getProductDisplayConfig(product, false).defaultVolume
+    setVolumes((prev) => ({
+      ...prev,
+      [product.id]: snapVolume(current + delta, product, false),
     }))
   }
 
@@ -668,176 +652,173 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-md bg-slate-100 pb-24">
-      <header className="sticky top-0 z-30 border-b border-brand-800/20 bg-brand-900 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] text-white shadow-lg">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-100/80">
-              URALSK VEG OPI
-            </p>
-            <h1 className="mt-1 text-xl font-bold leading-tight tracking-tight">
-              ОПТ ОВОЩИ УРАЛЬСК
-            </h1>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setCartOpen(true)}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
-              aria-label={`Корзина: ${cartCount} позиций`}
-            >
-              <ShoppingCart className="h-5 w-5" strokeWidth={2} />
-              {cartCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white shadow-md">
-                  {cartCount}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setProfileOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
-              aria-label="Личный кабинет"
-            >
-              <User className="h-5 w-5" strokeWidth={2} />
-            </button>
-            <Leaf className="h-9 w-9 text-brand-100" strokeWidth={1.5} aria-hidden />
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-3xl bg-white/10 p-2 text-sm text-white">
-          <button
-            type="button"
-            onClick={() => setIsB2B(true)}
-            className={`min-w-[7rem] rounded-full px-4 py-2 text-sm font-semibold transition ${
-              isB2B
-                ? 'bg-emerald-50 text-brand-900 shadow-sm'
-                : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            Опт
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsB2B(false)}
-            className={`min-w-[7rem] rounded-full px-4 py-2 text-sm font-semibold transition ${
-              !isB2B
-                ? 'bg-emerald-50 text-brand-900 shadow-sm'
-                : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            Розница
-          </button>
-          <span className="ml-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white/80">
-            {isB2B ? 'B2B режим' : 'B2C розничный' }
-          </span>
-        </div>
-        <div className="mt-3 flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-brand-50">
-          <CalendarCheck className="h-4 w-4 shrink-0" aria-hidden />
-          <span>Цены и остатки актуальны на сегодня — {today}</span>
-        </div>
-      </header>
-
-      <div
-        className={`sticky top-[calc(7.25rem+env(safe-area-inset-top))] z-20 bg-white px-3 transition-all duration-300 ${
-          filtersVisible
-            ? 'border-b border-slate-200 py-3 shadow-sm opacity-100'
-            : 'border-transparent py-0 opacity-0'
-        } overflow-hidden`}
-      >
-        <label className="relative block">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Поиск овощей..."
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-9 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-            aria-label="Поиск овощей"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-              aria-label="Очистить поиск"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </label>
-
-        <div
-          className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5"
-          aria-label="Расширенные фильтры"
-        >
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
-            <select
-              value={warehouseFilter}
-              onChange={(e) => setWarehouseFilter(e.target.value as WarehouseFilterId)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
-              aria-label="Фильтр по складу"
-            >
-              {WAREHOUSE_FILTERS.map((wh) => (
-                <option key={wh.id} value={wh.id}>
-                  {wh.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setOnlyInStock((v) => !v)}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.98] ${
-                onlyInStock
-                  ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
-              }`}
-              aria-pressed={onlyInStock}
-            >
-              Только в наличии
-            </button>
-
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
-                aria-label="Сортировка по цене"
+      <div className="relative border-b border-slate-200 bg-white shadow-sm">
+        <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-100/80">
+                URALSK VEG OPI
+              </p>
+              <h1 className="mt-1 text-xl font-bold leading-tight tracking-tight">
+                ОПТ ОВОЩИ УРАЛЬСК
+              </h1>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCartOpen(true)}
+                className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
+                aria-label={`Корзина: ${cartCount} позиций`}
               >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
+                <ShoppingCart className="h-5 w-5" strokeWidth={2} />
+                {cartCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white shadow-md">
+                    {cartCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
+                aria-label="Личный кабинет"
+              >
+                <User className="h-5 w-5" strokeWidth={2} />
+              </button>
+              <Leaf className="h-9 w-9 text-brand-100" strokeWidth={1.5} aria-hidden />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-white/10 p-1 text-sm text-white" role="tablist" aria-label="Тип покупателя">
+            <button
+              type="button"
+              onClick={() => setIsB2B(true)}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                isB2B
+                  ? 'bg-emerald-50 text-brand-900 shadow-sm'
+                  : 'text-white hover:bg-white/15'
+              }`}
+              role="tab"
+              aria-selected={isB2B}
+            >
+              Оптовый
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsB2B(false)}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                !isB2B
+                  ? 'bg-emerald-50 text-brand-900 shadow-sm'
+                  : 'text-white hover:bg-white/15'
+              }`}
+              role="tab"
+              aria-selected={!isB2B}
+            >
+              Розничный
+            </button>
+          </div>
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-brand-50">
+            <CalendarCheck className="h-4 w-4 shrink-0" aria-hidden />
+            <span>Цены и остатки актуальны на сегодня — {today}</span>
+          </div>
+        </header>
+
+        <div className="bg-white px-3 py-3">
+          <label className="relative block">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск овощей..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-9 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              aria-label="Поиск овощей"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                aria-label="Очистить поиск"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </label>
+
+          <div
+            className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5"
+            aria-label="Расширенные фильтры"
+          >
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
+              <select
+                value={warehouseFilter}
+                onChange={(e) => setWarehouseFilter(e.target.value as WarehouseFilterId)}
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                aria-label="Фильтр по складу"
+              >
+                {WAREHOUSE_FILTERS.map((wh) => (
+                  <option key={wh.id} value={wh.id}>
+                    {wh.label}
                   </option>
                 ))}
               </select>
             </div>
-          </div>
-        </div>
 
-        <nav className="mt-3" aria-label="Фильтр ассортимента">
-          <div className="flex gap-2 overflow-x-auto scrollbar-none">
-            {TABS.map((tab) => (
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-brand-700 text-white shadow-md'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                onClick={() => setOnlyInStock((v) => !v)}
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.98] ${
+                  onlyInStock
+                    ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
                 }`}
+                aria-pressed={onlyInStock}
               >
-                {tab.label}
+                Только в наличии
               </button>
-            ))}
+
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                  aria-label="Сортировка по цене"
+                >
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
-        </nav>
+
+          <nav className="mt-3" aria-label="Фильтр ассортимента">
+            <div className="flex gap-2 overflow-x-auto scrollbar-none">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-brand-700 text-white shadow-md'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        </div>
       </div>
 
       <main className="space-y-4 px-3 pt-4">
@@ -950,10 +931,10 @@ export default function App() {
                   )}
                 </div>
 
-                {product.minOrder && (
+                {(product.minOrder || !isB2B) && (
                   <p className="flex items-center gap-1.5 text-sm text-slate-600">
                     <Scale className="h-4 w-4 text-brand-600" aria-hidden />
-                    {product.minOrder}
+                    {isB2B ? product.minOrder : 'Розничный заказ от 5 кг, точный выбор по 1 кг'}
                   </p>
                 )}
                 {product.bookingNote && (
@@ -1028,19 +1009,98 @@ export default function App() {
                 <hr className="border-gray-100" />
 
                 <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-slate-700">Объём закупки</span>
-                      <div className="flex items-center gap-1.5">
-                        {(() => {
-                          const cfg = getProductDisplayConfig(product, isB2B)
-                          return (
-                            <>
+                  {isB2B ? (
+                    <>
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-slate-700">Объём закупки</span>
+                        <div className="flex items-center gap-1.5">
+                          {(() => {
+                            const cfg = getProductDisplayConfig(product, true)
+                            return (
+                              <>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={cfg.sliderMin}
+                                  max={cfg.sliderMax}
+                                  step={cfg.sliderStep}
+                                  value={volume}
+                                  onChange={(e) => {
+                                    const parsed = Number(e.target.value)
+                                    if (!Number.isNaN(parsed)) {
+                                      setProductVolume(product, parsed)
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const parsed = Number(e.target.value)
+                                    if (Number.isNaN(parsed) || e.target.value === '') {
+                                      setProductVolume(product, cfg.sliderMin)
+                                    } else {
+                                      setProductVolume(product, parsed)
+                                    }
+                                  }}
+                                  className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
+                                  aria-label={`Объём закупки в ${unit}`}
+                                />
+                                <span className="text-sm font-semibold text-slate-500">{unit}</span>
+                              </>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                      {(() => {
+                        const cfg = getProductDisplayConfig(product, true)
+                        return (
+                          <>
+                            <input
+                              type="range"
+                              min={cfg.sliderMin}
+                              max={cfg.sliderMax}
+                              step={cfg.sliderStep}
+                              value={volume}
+                              onChange={(e) => setProductVolume(product, Number(e.target.value))}
+                              className="w-full accent-emerald-600"
+                              aria-label={`Ползунок объёма: ${product.name}`}
+                            />
+                            <div className="mt-1 flex justify-between text-[11px] text-slate-400">
+                              <span>
+                                {cfg.unitMode === 'tons' ? `${cfg.sliderMin} т` : `${cfg.sliderMin} кг`}
+                              </span>
+                              <span className="text-slate-500">{formatVolumeLabel(product, volume, true)}</span>
+                              <span>
+                                {cfg.unitMode === 'tons' ? `${cfg.sliderMax} т` : `${cfg.sliderMax} кг`}
+                              </span>
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-slate-700">Вес покупки</span>
+                        <span className="text-xs font-semibold text-slate-500">шаг 1 кг</span>
+                      </div>
+                      {(() => {
+                        const cfg = getProductDisplayConfig(product, false)
+                        return (
+                          <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => changeRetailVolume(product, -1)}
+                              disabled={volume <= cfg.sliderMin}
+                              className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+                              aria-label={`Уменьшить вес ${product.name} на 1 кг`}
+                            >
+                              <Minus className="h-5 w-5" aria-hidden />
+                            </button>
+                            <label className="flex min-w-0 items-center justify-center border-x border-slate-200 px-2">
                               <input
                                 type="number"
-                                inputMode="decimal"
+                                inputMode="numeric"
                                 min={cfg.sliderMin}
                                 max={cfg.sliderMax}
-                                step={cfg.sliderStep}
+                                step={1}
                                 value={volume}
                                 onChange={(e) => {
                                   const parsed = Number(e.target.value)
@@ -1056,41 +1116,25 @@ export default function App() {
                                     setProductVolume(product, parsed)
                                   }
                                 }}
-                                className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
-                                aria-label={`Объём закупки в ${unit}`}
+                                className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none"
+                                aria-label={`Вес покупки в килограммах: ${product.name}`}
                               />
-                              <span className="text-sm font-semibold text-slate-500">{unit}</span>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    </div>
-                    {(() => {
-                      const cfg = getProductDisplayConfig(product, isB2B)
-                      return (
-                        <>
-                          <input
-                            type="range"
-                            min={cfg.sliderMin}
-                            max={cfg.sliderMax}
-                            step={cfg.sliderStep}
-                            value={volume}
-                            onChange={(e) => setProductVolume(product, Number(e.target.value))}
-                            className="w-full accent-emerald-600"
-                            aria-label={`Ползунок объёма: ${product.name}`}
-                          />
-                          <div className="mt-1 flex justify-between text-[11px] text-slate-400">
-                            <span>
-                              {cfg.unitMode === 'tons' ? `${cfg.sliderMin} т` : `${cfg.sliderMin} кг`}
-                            </span>
-                            <span className="text-slate-500">{formatVolumeLabel(product, volume, isB2B)}</span>
-                            <span>
-                              {cfg.unitMode === 'tons' ? `${cfg.sliderMax} т` : `${cfg.sliderMax} кг`}
-                            </span>
+                              <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => changeRetailVolume(product, 1)}
+                              disabled={volume >= cfg.sliderMax}
+                              className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+                              aria-label={`Увеличить вес ${product.name} на 1 кг`}
+                            >
+                              <Plus className="h-5 w-5" aria-hidden />
+                            </button>
                           </div>
-                        </>
-                      )
-                    })()}
+                        )
+                      })()}
+                    </>
+                  )}
                   <p
                     className={`mt-4 text-center text-xl font-bold ${
                       hasDiscount ? 'text-emerald-700' : 'text-slate-800'
@@ -1127,7 +1171,7 @@ export default function App() {
       </main>
 
       <footer className="px-4 pt-6 text-center text-xs text-slate-500">
-        B2B-витрина · Уральск, Казахстан · Оптовые цены в тенге (₸)
+        Оптово-розничная витрина · Уральск, Казахстан · Цены в тенге (₸)
       </footer>
 
       {cartCount > 0 && (
@@ -1160,7 +1204,7 @@ export default function App() {
             <div className="flex items-start justify-between border-b border-slate-100 px-5 pb-4 pt-3">
               <div>
                 <h3 id="cart-modal-title" className="text-lg font-bold text-brand-900">
-                  Ваш оптовый заказ
+                  {isB2B ? 'Ваш оптовый заказ' : 'Ваш розничный заказ'}
                 </h3>
                 <p className="mt-0.5 text-xs text-slate-500">
                   {cartCount}{' '}
@@ -1239,7 +1283,7 @@ export default function App() {
                   onClick={handleBookCart}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
                 >
-                  {isB2B ? 'Забронировать всё в WhatsApp' : 'Заказать мешок с доставкой'}
+                  {isB2B ? 'Забронировать всё в WhatsApp' : 'Оформить заказ в WhatsApp'}
                 </button>
               </div>
             )}
