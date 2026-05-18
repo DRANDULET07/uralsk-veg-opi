@@ -473,7 +473,7 @@ export default function App() {
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
   const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
   const [cart, setCart] = useState<Cart>({})
-  const [orderName, setOrderName] = useState('')
+  const [orderName] = useState('')
   const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
   const [showMyOrders, setShowMyOrders] = useState(false)
