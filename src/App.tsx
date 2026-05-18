@@ -58,6 +58,22 @@ interface CartLine {
   volumeLabel: string
 }
 
+interface SavedOrderItem {
+  productId: string
+  productName: string
+  volume: number
+  volumeLabel: string
+  total: number
+}
+
+interface SavedOrder {
+  userName?: string
+  createdAt: string
+  items: SavedOrderItem[]
+  total: number
+  status: string
+}
+
 interface MockOrder {
   id: string
   date: string
@@ -67,6 +83,10 @@ interface MockOrder {
   status: string
   statusTone: 'delivered' | 'transit'
 }
+
+const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
+const LOCAL_STORAGE_HISTORY = 'order_history'
+const RETAIL_MARKUP = 90
 
 const PRODUCTS: Product[] = [
   {
@@ -244,16 +264,38 @@ function getDiscountPercent(volume: number, min: number, max: number): number {
   return 5 + ratio * 2
 }
 
-function getWeightKg(product: Product, volume: number): number {
-  return product.unitMode === 'tons' ? volume * 1000 : volume
+function getWeightKg(product: Product, volume: number, isB2B = true): number {
+  const displayUnit = isB2B ? product.unitMode : 'kg'
+  return displayUnit === 'tons' ? volume * 1000 : volume
 }
 
-function getVolumeUnit(product: Product): string {
-  return product.unitMode === 'tons' ? 'т' : 'кг'
+function getProductDisplayConfig(product: Product, isB2B: boolean) {
+  if (isB2B) {
+    return {
+      unitMode: product.unitMode,
+      sliderMin: product.sliderMin,
+      sliderMax: product.sliderMax,
+      sliderStep: product.sliderStep,
+      defaultVolume: product.defaultVolume,
+    }
+  }
+
+  return {
+    unitMode: 'kg' as const,
+    sliderMin: 5,
+    sliderMax: 50,
+    sliderStep: 5,
+    defaultVolume: 10,
+  }
 }
 
-function snapVolume(value: number, product: Product): number {
-  const { sliderMin, sliderMax, sliderStep } = product
+function getVolumeUnit(product: Product, isB2B = true): string {
+  const unitMode = isB2B ? product.unitMode : 'kg'
+  return unitMode === 'tons' ? 'т' : 'кг'
+}
+
+function snapVolume(value: number, product: Product, isB2B = true): number {
+  const { sliderMin, sliderMax, sliderStep } = getProductDisplayConfig(product, isB2B)
   const clamped = Math.min(sliderMax, Math.max(sliderMin, value))
   const stepped =
     sliderMin + Math.round((clamped - sliderMin) / sliderStep) * sliderStep
@@ -261,49 +303,56 @@ function snapVolume(value: number, product: Product): number {
   return Number(stepped.toFixed(decimals))
 }
 
-function formatVolumeLabel(product: Product, volume: number): string {
-  if (product.unitMode === 'tons') {
+function formatVolumeLabel(product: Product, volume: number, isB2B = true): string {
+  const unitMode = isB2B ? product.unitMode : 'kg'
+  if (unitMode === 'tons') {
     const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
     return `${label} ${volume === 1 ? 'тонна' : volume < 5 ? 'тонны' : 'тонн'}`
   }
   return `${formatMoney(volume)} кг`
 }
 
-function formatVolumeWhatsApp(product: Product, volume: number): string {
-  if (product.unitMode === 'tons') {
+function formatVolumeWhatsApp(product: Product, volume: number, isB2B = true): string {
+  const unitMode = isB2B ? product.unitMode : 'kg'
+  if (unitMode === 'tons') {
     const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
     return `${label} тонн`
   }
   return `${formatMoney(volume)} кг`
 }
 
-function formatOrderVolume(product: Product, volume: number): string {
-  if (product.unitMode === 'tons') {
+function formatOrderVolume(product: Product, volume: number, isB2B = true): string {
+  const unitMode = isB2B ? product.unitMode : 'kg'
+  if (unitMode === 'tons') {
     const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
     return `${label} т`
   }
   return `${formatMoney(volume)} кг`
 }
 
-function calcPricing(product: Product, volume: number) {
-  const weightKg = getWeightKg(product, volume)
-  const discount = getDiscountPercent(volume, product.sliderMin, product.sliderMax)
-  const pricePerKg = product.basePrice * (1 - discount / 100)
+function calcPricing(product: Product, volume: number, isB2B = true) {
+  const weightKg = getWeightKg(product, volume, isB2B)
+  const { sliderMin, sliderMax } = getProductDisplayConfig(product, isB2B)
+  const discount = isB2B
+    ? getDiscountPercent(volume, sliderMin, sliderMax)
+    : 0
+  const pricePerKg =
+    (product.basePrice + (isB2B ? 0 : RETAIL_MARKUP)) * (1 - discount / 100)
   const total = weightKg * pricePerKg
   return { weightKg, discount, pricePerKg, total }
 }
 
-function getCartLines(cart: Cart): CartLine[] {
+function getCartLines(cart: Cart, isB2B: boolean): CartLine[] {
   return Object.entries(cart)
     .map(([productId, volume]) => {
       const product = PRODUCTS.find((p) => p.id === productId)
       if (!product) return null
-      const { total } = calcPricing(product, volume)
+      const { total } = calcPricing(product, volume, isB2B)
       return {
         product,
         volume,
         total,
-        volumeLabel: formatVolumeLabel(product, volume),
+        volumeLabel: formatVolumeLabel(product, volume, isB2B),
       }
     })
     .filter((line): line is CartLine => line !== null)
@@ -316,10 +365,10 @@ function getCartTotalTons(lines: CartLine[]): number {
   }, 0)
 }
 
-function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number): string {
+function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
   const itemLines = lines.map(
     (line) =>
-      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume)} (Итого: ${formatMoney(line.total)} ₸)`,
+      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume, isB2B)} (Итого: ${formatMoney(line.total)} ₸)`,
   )
   const totalTons = getCartTotalTons(lines)
   const tonsLabel =
@@ -339,8 +388,8 @@ function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number): string
   ].join('\n')
 }
 
-function openCartWhatsApp(lines: CartLine[], grandTotal: number) {
-  const text = buildCartWhatsAppMessage(lines, grandTotal)
+function openCartWhatsApp(lines: CartLine[], grandTotal: number, isB2B: boolean) {
+  const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B)
   const url = `https://api.whatsapp.com/send?phone=${WHATSAPP_PHONE}&text=${encodeURIComponent(text)}`
   window.open(url, '_blank', 'noopener,noreferrer')
 }
@@ -391,6 +440,25 @@ const statusToneClass: Record<Product['statusTone'], string> = {
   transit: 'bg-sky-50 text-sky-900 border-sky-200',
 }
 
+function ProductSkeleton() {
+  return (
+    <article className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70">
+      <div className="relative h-48 w-full overflow-hidden bg-slate-200">
+        <div className="absolute inset-0 animate-pulse bg-slate-300" />
+      </div>
+      <div className="space-y-4 p-5">
+        <div className="h-4 w-32 rounded-full bg-slate-200 animate-pulse" />
+        <div className="h-6 w-1/2 rounded-full bg-slate-200 animate-pulse" />
+        <div className="space-y-3">
+          <div className="h-10 rounded-2xl bg-slate-100 animate-pulse" />
+          <div className="h-24 rounded-2xl bg-slate-100 animate-pulse" />
+          <div className="h-12 rounded-2xl bg-slate-100 animate-pulse" />
+        </div>
+      </div>
+    </article>
+  )
+}
+
 export default function App() {
   const today = useMemo(() => formatDateRu(new Date()), [])
   const [activeTab, setActiveTab] = useState<TabId>('all')
@@ -398,12 +466,18 @@ export default function App() {
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilterId>('all')
   const [onlyInStock, setOnlyInStock] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('default')
+  const [isB2B, setIsB2B] = useState(true)
   const [profileOpen, setProfileOpen] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
   const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
   const [cart, setCart] = useState<Cart>({})
+  const [orderName, setOrderName] = useState('')
+  const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
+  const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
+  const [showMyOrders, setShowMyOrders] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
   )
@@ -440,6 +514,42 @@ export default function App() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  useEffect(() => {
+    const storedLastOrder = localStorage.getItem(LOCAL_STORAGE_LAST_ORDER)
+    const storedHistory = localStorage.getItem(LOCAL_STORAGE_HISTORY)
+
+    if (storedLastOrder) {
+      try {
+        setLastOrder(JSON.parse(storedLastOrder))
+      } catch {
+        localStorage.removeItem(LOCAL_STORAGE_LAST_ORDER)
+      }
+    }
+
+    if (storedHistory) {
+      try {
+        const parsed = JSON.parse(storedHistory) as SavedOrder[]
+        setOrderHistory(parsed.slice(-5).reverse())
+      } catch {
+        localStorage.removeItem(LOCAL_STORAGE_HISTORY)
+      }
+    }
+
+    const timeout = window.setTimeout(() => setIsLoading(false), 800)
+    return () => window.clearTimeout(timeout)
+  }, [])
+
+  useEffect(() => {
+    setVolumes(
+      Object.fromEntries(
+        PRODUCTS.map((product) => {
+          const config = getProductDisplayConfig(product, isB2B)
+          return [product.id, config.defaultVolume]
+        }),
+      ),
+    )
+  }, [isB2B])
+
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
   const filteredProducts = useMemo(() => {
@@ -453,7 +563,7 @@ export default function App() {
     return sortProducts(list, sortBy)
   }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, sortBy])
 
-  const cartLines = useMemo(() => getCartLines(cart), [cart])
+  const cartLines = useMemo(() => getCartLines(cart, isB2B), [cart, isB2B])
   const cartCount = cartLines.length
   const cartGrandTotal = useMemo(
     () => cartLines.reduce((sum, line) => sum + line.total, 0),
@@ -469,18 +579,18 @@ export default function App() {
   const setProductVolume = (product: Product, raw: number) => {
     setVolumes((prev) => ({
       ...prev,
-      [product.id]: snapVolume(raw, product),
+      [product.id]: snapVolume(raw, product, isB2B),
     }))
   }
 
   const addToCart = (product: Product) => {
-    const selected = volumes[product.id] ?? product.defaultVolume
+    const selected = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
     setCart((prev) => {
       const current = prev[product.id] ?? 0
       const nextVolume = current > 0 ? current + selected : selected
       return {
         ...prev,
-        [product.id]: snapVolume(nextVolume, product),
+        [product.id]: snapVolume(nextVolume, product, isB2B),
       }
     })
     setAddedProductId(product.id)
@@ -516,10 +626,44 @@ export default function App() {
     setCart({})
   }
 
+  const saveOrderToStorage = (order: SavedOrder) => {
+    localStorage.setItem(LOCAL_STORAGE_LAST_ORDER, JSON.stringify(order))
+    setLastOrder(order)
+    const updatedHistory = [order, ...orderHistory].slice(0, 5)
+    setOrderHistory(updatedHistory)
+    localStorage.setItem(LOCAL_STORAGE_HISTORY, JSON.stringify(updatedHistory))
+  }
+
   const handleBookCart = () => {
     if (cartLines.length === 0) return
-    openCartWhatsApp(cartLines, cartGrandTotal)
+
+    const order: SavedOrder = {
+      userName: orderName.trim() || undefined,
+      createdAt: new Date().toISOString(),
+      items: cartLines.map((line) => ({
+        productId: line.product.id,
+        productName: line.product.name,
+        volume: line.volume,
+        volumeLabel: line.volumeLabel,
+        total: line.total,
+      })),
+      total: cartGrandTotal,
+      status: 'Отправлено в WhatsApp',
+    }
+
+    saveOrderToStorage(order)
+    openCartWhatsApp(cartLines, cartGrandTotal, isB2B)
     clearCart()
+  }
+
+  const handleRepeatLastOrder = () => {
+    if (!lastOrder) return
+    const nextCart: Cart = {}
+    lastOrder.items.forEach((item) => {
+      nextCart[item.productId] = item.volume
+    })
+    setCart(nextCart)
+    setCartOpen(true)
   }
 
   return (
@@ -558,6 +702,33 @@ export default function App() {
             </button>
             <Leaf className="h-9 w-9 text-brand-100" strokeWidth={1.5} aria-hidden />
           </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-3xl bg-white/10 p-2 text-sm text-white">
+          <button
+            type="button"
+            onClick={() => setIsB2B(true)}
+            className={`min-w-[7rem] rounded-full px-4 py-2 text-sm font-semibold transition ${
+              isB2B
+                ? 'bg-emerald-50 text-brand-900 shadow-sm'
+                : 'bg-white/10 text-white hover:bg-white/20'
+            }`}
+          >
+            Опт
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsB2B(false)}
+            className={`min-w-[7rem] rounded-full px-4 py-2 text-sm font-semibold transition ${
+              !isB2B
+                ? 'bg-emerald-50 text-brand-900 shadow-sm'
+                : 'bg-white/10 text-white hover:bg-white/20'
+            }`}
+          >
+            Розница
+          </button>
+          <span className="ml-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white/80">
+            {isB2B ? 'B2B режим' : 'B2C розничный' }
+          </span>
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-brand-50">
           <CalendarCheck className="h-4 w-4 shrink-0" aria-hidden />
@@ -670,7 +841,40 @@ export default function App() {
       </div>
 
       <main className="space-y-4 px-3 pt-4">
-        {filteredProducts.length === 0 && (
+        {lastOrder && (
+          <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Рады видеть вас снова!</p>
+                <p className="mt-1 text-sm text-emerald-900/80">
+                  Повторить ваш прошлый заказ?
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRepeatLastOrder}
+                className="rounded-full bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+              >
+                Повторить в 1 клик
+              </button>
+            </div>
+            <div className="mt-3 space-y-2 text-sm text-emerald-950">
+              {lastOrder.items.map((item) => (
+                <p key={item.productId} className="leading-tight">
+                  • {item.productName}: {item.volumeLabel}
+                </p>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {isLoading ? (
+          <div className="space-y-4">
+            {[...Array(4)].map((_, index) => (
+              <ProductSkeleton key={index} />
+            ))}
+          </div>
+        ) : filteredProducts.length === 0 ? (
           <p className="rounded-xl bg-white p-6 text-center text-slate-500">
             {normalizedSearch
               ? `По запросу «${searchQuery.trim()}» ничего не найдено.`
@@ -678,13 +882,12 @@ export default function App() {
                 ? 'По выбранным фильтрам позиций нет. Измените склад, вкладку или снимите «Только в наличии».'
                 : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
           </p>
-        )}
-
-        {filteredProducts.map((product) => {
-          const volume = volumes[product.id] ?? product.defaultVolume
-          const { discount, pricePerKg, total } = calcPricing(product, volume)
+        ) : (
+          filteredProducts.map((product) => {
+          const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
+          const { discount, pricePerKg, total } = calcPricing(product, volume, isB2B)
           const hasDiscount = discount > 0
-          const unit = getVolumeUnit(product)
+          const unit = getVolumeUnit(product, isB2B)
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
           const analyticsActionClass = 'bg-white text-emerald-700'
@@ -736,7 +939,7 @@ export default function App() {
                           {Math.round(pricePerKg)} ₸/кг
                         </>
                       ) : (
-                        <>{product.basePrice} ₸/кг</>
+                        <>{Math.round(pricePerKg)} ₸/кг</>
                       )}
                     </p>
                   </div>
@@ -826,66 +1029,74 @@ export default function App() {
 
                 <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold text-slate-700">
-                      Объём закупки
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min={product.sliderMin}
-                        max={product.sliderMax}
-                        step={product.sliderStep}
-                        value={volume}
-                        onChange={(e) => {
-                          const parsed = Number(e.target.value)
-                          if (!Number.isNaN(parsed)) {
-                            setProductVolume(product, parsed)
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const parsed = Number(e.target.value)
-                          if (Number.isNaN(parsed) || e.target.value === '') {
-                            setProductVolume(product, product.sliderMin)
-                          } else {
-                            setProductVolume(product, parsed)
-                          }
-                        }}
-                        className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
-                        aria-label={`Объём закупки в ${unit}`}
-                      />
-                      <span className="text-sm font-semibold text-slate-500">{unit}</span>
+                      <span className="text-sm font-bold text-slate-700">Объём закупки</span>
+                      <div className="flex items-center gap-1.5">
+                        {(() => {
+                          const cfg = getProductDisplayConfig(product, isB2B)
+                          return (
+                            <>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min={cfg.sliderMin}
+                                max={cfg.sliderMax}
+                                step={cfg.sliderStep}
+                                value={volume}
+                                onChange={(e) => {
+                                  const parsed = Number(e.target.value)
+                                  if (!Number.isNaN(parsed)) {
+                                    setProductVolume(product, parsed)
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const parsed = Number(e.target.value)
+                                  if (Number.isNaN(parsed) || e.target.value === '') {
+                                    setProductVolume(product, cfg.sliderMin)
+                                  } else {
+                                    setProductVolume(product, parsed)
+                                  }
+                                }}
+                                className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
+                                aria-label={`Объём закупки в ${unit}`}
+                              />
+                              <span className="text-sm font-semibold text-slate-500">{unit}</span>
+                            </>
+                          )
+                        })()}
+                      </div>
                     </div>
-                  </div>
-                  <input
-                    type="range"
-                    min={product.sliderMin}
-                    max={product.sliderMax}
-                    step={product.sliderStep}
-                    value={volume}
-                    onChange={(e) => setProductVolume(product, Number(e.target.value))}
-                    className="w-full accent-emerald-600"
-                    aria-label={`Ползунок объёма: ${product.name}`}
-                  />
-                  <div className="mt-1 flex justify-between text-[11px] text-slate-400">
-                    <span>
-                      {product.unitMode === 'tons'
-                        ? `${product.sliderMin} т`
-                        : `${product.sliderMin} кг`}
-                    </span>
-                    <span className="text-slate-500">{formatVolumeLabel(product, volume)}</span>
-                    <span>
-                      {product.unitMode === 'tons'
-                        ? `${product.sliderMax} т`
-                        : `${product.sliderMax} кг`}
-                    </span>
-                  </div>
+                    {(() => {
+                      const cfg = getProductDisplayConfig(product, isB2B)
+                      return (
+                        <>
+                          <input
+                            type="range"
+                            min={cfg.sliderMin}
+                            max={cfg.sliderMax}
+                            step={cfg.sliderStep}
+                            value={volume}
+                            onChange={(e) => setProductVolume(product, Number(e.target.value))}
+                            className="w-full accent-emerald-600"
+                            aria-label={`Ползунок объёма: ${product.name}`}
+                          />
+                          <div className="mt-1 flex justify-between text-[11px] text-slate-400">
+                            <span>
+                              {cfg.unitMode === 'tons' ? `${cfg.sliderMin} т` : `${cfg.sliderMin} кг`}
+                            </span>
+                            <span className="text-slate-500">{formatVolumeLabel(product, volume, isB2B)}</span>
+                            <span>
+                              {cfg.unitMode === 'tons' ? `${cfg.sliderMax} т` : `${cfg.sliderMax} кг`}
+                            </span>
+                          </div>
+                        </>
+                      )
+                    })()}
                   <p
                     className={`mt-4 text-center text-xl font-bold ${
                       hasDiscount ? 'text-emerald-700' : 'text-slate-800'
                     }`}
                   >
-                    Итого за {formatVolumeLabel(product, volume)}:{' '}
+                    Итого за {formatVolumeLabel(product, volume, isB2B)}:{' '}
                     <span className="tabular-nums">{formatMoney(total)} ₸</span>
                   </p>
                   {hasDiscount && (
@@ -912,7 +1123,7 @@ export default function App() {
               </div>
             </article>
           )
-        })}
+        }))}
       </main>
 
       <footer className="px-4 pt-6 text-center text-xs text-slate-500">
@@ -1028,7 +1239,7 @@ export default function App() {
                   onClick={handleBookCart}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
                 >
-                  Забронировать всё в WhatsApp
+                  {isB2B ? 'Забронировать всё в WhatsApp' : 'Заказать мешок с доставкой'}
                 </button>
               </div>
             )}
@@ -1078,6 +1289,16 @@ export default function App() {
 
               <section>
                 <h4 className="mb-3 text-sm font-bold text-slate-800">История заказов</h4>
+                <div className="flex items-center justify-between">
+                  <h5 className="text-sm font-semibold text-slate-800">Быстрые примеры</h5>
+                  <button
+                    type="button"
+                    onClick={() => setShowMyOrders((s) => !s)}
+                    className="text-xs text-brand-700"
+                  >
+                    {showMyOrders ? 'Скрыть мои заказы' : 'Показать мои заказы'}
+                  </button>
+                </div>
                 <ul className="space-y-3">
                   {MOCK_ORDERS.map((order) => {
                     const product = PRODUCTS.find((p) => p.id === order.productId)
@@ -1123,8 +1344,34 @@ export default function App() {
                         </button>
                       </li>
                     )
-                  })}
-                </ul>
+                    })}
+                  </ul>
+
+                  {showMyOrders && (
+                    <div className="mt-4">
+                      <h5 className="mb-2 text-sm font-semibold text-slate-800">Мои чеки</h5>
+                      {orderHistory.length === 0 ? (
+                        <p className="text-sm text-slate-500">Пока нет отправленных накладных.</p>
+                      ) : (
+                        <ul className="space-y-3">
+                          {orderHistory.map((so, idx) => (
+                            <li key={idx} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-800">{formatDateRu(new Date(so.createdAt))}</p>
+                                  <p className="mt-1 text-sm text-slate-600">{so.items.map(i => `${i.productName} (${i.volumeLabel})`).join(', ')}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-brand-800">{formatMoney(so.total)} ₸</p>
+                                  <p className="text-xs text-slate-500">{so.status}</p>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
               </section>
             </div>
           </div>
