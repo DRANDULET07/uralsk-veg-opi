@@ -1,0 +1,141 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.products (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  category text,
+  image text,
+  wholesale_price numeric not null,
+  retail_price numeric not null,
+  unit text default 'кг',
+  min_order numeric default 1,
+  status text,
+  freshness text,
+  location text,
+  description text,
+  origin text,
+  in_stock boolean default true,
+  stock_amount numeric default 0,
+  is_in_transit boolean default false,
+  delivery_eta text,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+alter table public.products enable row level security;
+
+drop policy if exists "Allow public read access to products" on public.products;
+
+create policy "Allow public read access to products"
+  on public.products
+  for select
+  using (true);
+
+insert into public.products (
+  name,
+  category,
+  image,
+  wholesale_price,
+  retail_price,
+  unit,
+  min_order,
+  status,
+  freshness,
+  location,
+  description,
+  origin,
+  in_stock,
+  stock_amount,
+  is_in_transit,
+  delivery_eta
+) values
+  (
+    'Картофель',
+    'Местный, КХ',
+    '/products/potato.jpg',
+    150,
+    240,
+    'т',
+    1,
+    'Свежий привоз',
+    'Цена стабильна',
+    'Склад №1 (Уральск)',
+    'Стабильный объем местного картофеля. Запасы на складе в избытке.',
+    'Уральск',
+    true,
+    42,
+    false,
+    null
+  ),
+  (
+    'Лук репчатый',
+    'Оптовая партия',
+    '/products/onion.jpg',
+    110,
+    200,
+    'т',
+    1,
+    'В наличии',
+    'Сезонное снижение цены',
+    'Склад №1 (Уральск)',
+    'Крупная партия репчатого лука высокого качества.',
+    'Казахстан',
+    true,
+    38,
+    false,
+    null
+  ),
+  (
+    'Морковь',
+    'Мытая',
+    '/products/carrot.jpg',
+    130,
+    220,
+    'т',
+    1,
+    'В пути',
+    'Ожидается подорожание',
+    'Таможенный пост Маштаково / Самарская трасса',
+    'Доступно бронирование партии в пути.',
+    'Узбекистан',
+    true,
+    25,
+    true,
+    'Ожидается завтра'
+  ),
+  (
+    'Томаты',
+    'Тепличные',
+    '/products/tomato.jpg',
+    650,
+    740,
+    'кг',
+    5,
+    'Свежий привоз',
+    'Высокий спрос',
+    'Склад №2 (Охлаждаемый)',
+    'Тепличные томаты пользуются повышенным спросом перед выходными.',
+    'Казахстан',
+    true,
+    50,
+    false,
+    null
+  ),
+  (
+    'Капуста',
+    'Белокочанная',
+    '/products/cabbage.jpg',
+    95,
+    185,
+    'т',
+    1,
+    'Свежий привоз',
+    'Цена стабильна',
+    'Склад №1 (Уральск)',
+    'Качество партии отличное, товар готов к длительной транспортировке.',
+    'Казахстан',
+    true,
+    44,
+    false,
+    null
+  );

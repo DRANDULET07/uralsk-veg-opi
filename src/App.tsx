@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
+﻿import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpDown,
   CalendarCheck,
@@ -17,42 +17,16 @@ import {
   User,
   X,
 } from 'lucide-react'
-import { supabase } from './lib/supabaseClient'
+import { getErrorMessage, getProducts } from './services/products'
+import type { Product } from './types/product'
 
 const WHATSAPP_PHONE = '77774681889'
 const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
 
 type TabId = 'all' | 'warehouse' | 'transit'
-type UnitMode = 'tons' | 'kg'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
 type SortOption = 'default' | 'price-asc' | 'price-desc'
 type Cart = Record<string, number>
-
-interface Product {
-  id: string
-  name: string
-  subtitle: string
-  image: string
-  statusEmoji: string
-  statusText: string
-  statusTone: 'fresh' | 'stock' | 'transit'
-  availability: 'warehouse' | 'transit'
-  basePrice: number
-  minOrder?: string
-  location: string
-  bookingNote?: string
-  unitMode: UnitMode
-  sliderMin: number
-  sliderMax: number
-  sliderStep: number
-  defaultVolume: number
-  retailStockKg?: number
-  analyticsTitle: string
-  analyticsText: string
-  trackStatus?: null
-  trackSteps?: string[]
-  trackCurrent?: number
-}
 
 interface CartLine {
   product: Product
@@ -91,15 +65,14 @@ const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 5
-type ProductRow = Record<string, unknown>
 
-const PRODUCTS: Product[] = [
+const fallbackProducts: Product[] = [
   {
     id: 'potato',
     name: 'Картофель',
     subtitle: 'Местный, КХ',
     image: '/products/potato.jpg',
-    statusEmoji: '🟢',
+    statusEmoji: '',
     statusText: 'Свежий привоз (Сегодня 08:00)',
     statusTone: 'fresh',
     availability: 'warehouse',
@@ -121,7 +94,7 @@ const PRODUCTS: Product[] = [
     name: 'Лук репчатый',
     subtitle: 'Оптовая партия',
     image: '/products/onion.jpg',
-    statusEmoji: '🟡',
+    statusEmoji: '',
     statusText: 'В наличии (На складе 3 дня)',
     statusTone: 'stock',
     availability: 'warehouse',
@@ -143,7 +116,7 @@ const PRODUCTS: Product[] = [
     name: 'Морковь',
     subtitle: 'Мытая',
     image: '/products/carrot.jpg',
-    statusEmoji: '🚚',
+    statusEmoji: '',
     statusText: 'В пути (Ожидается завтра)',
     statusTone: 'transit',
     availability: 'transit',
@@ -166,7 +139,7 @@ const PRODUCTS: Product[] = [
     name: 'Томаты',
     subtitle: 'Тепличные',
     image: '/products/tomato.jpg',
-    statusEmoji: '🟢',
+    statusEmoji: '',
     statusText: 'Свежий привоз (Сегодня)',
     statusTone: 'fresh',
     availability: 'warehouse',
@@ -188,7 +161,7 @@ const PRODUCTS: Product[] = [
     name: 'Капуста',
     subtitle: 'Белокочанная',
     image: '/products/cabbage.jpg',
-    statusEmoji: '🟢',
+    statusEmoji: '',
     statusText: 'Свежий привоз (Сегодня 10:30)',
     statusTone: 'fresh',
     availability: 'warehouse',
@@ -263,6 +236,10 @@ function formatMoney(value: number): string {
   return new Intl.NumberFormat('ru-RU').format(Math.round(value))
 }
 
+function formatCurrency(value: number): string {
+  return `${formatMoney(value)} тг`
+}
+
 function getMidpoint(min: number, max: number): number {
   return (min + max) / 2
 }
@@ -335,7 +312,7 @@ function formatOrderVolume(product: Product, volume: number, isB2B = true): stri
   const unitMode = isB2B ? product.unitMode : 'kg'
   if (unitMode === 'tons') {
     const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
-    return `${label} т`
+    return `${label} С‚`
   }
   return `${formatMoney(volume)} кг`
 }
@@ -346,98 +323,11 @@ function calcPricing(product: Product, volume: number, isB2B = true) {
   const discount = isB2B
     ? getDiscountPercent(volume, sliderMin, sliderMax)
     : 0
-  const pricePerKg =
-    (product.basePrice + (isB2B ? 0 : RETAIL_MARKUP)) * (1 - discount / 100)
+  const wholesalePrice = product.wholesale_price ?? product.basePrice
+  const retailPrice = product.retail_price ?? product.basePrice + RETAIL_MARKUP
+  const pricePerKg = (isB2B ? wholesalePrice : retailPrice) * (1 - discount / 100)
   const total = weightKg * pricePerKg
   return { weightKg, discount, pricePerKg, total }
-}
-
-function getString(row: ProductRow, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = row[key]
-    if (typeof value === 'string' && value.trim()) return value
-  }
-  return undefined
-}
-
-function getNumber(row: ProductRow, keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = row[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = Number(value)
-      if (Number.isFinite(parsed)) return parsed
-    }
-  }
-  return undefined
-}
-
-function getStringArray(row: ProductRow, keys: string[]): string[] | undefined {
-  for (const key of keys) {
-    const value = row[key]
-    if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
-      return value
-    }
-  }
-  return undefined
-}
-
-function isStatusTone(value: string | undefined): value is Product['statusTone'] {
-  return value === 'fresh' || value === 'stock' || value === 'transit'
-}
-
-function isAvailability(value: string | undefined): value is Product['availability'] {
-  return value === 'warehouse' || value === 'transit'
-}
-
-function isUnitMode(value: string | undefined): value is Product['unitMode'] {
-  return value === 'tons' || value === 'kg'
-}
-
-function normalizeProduct(row: ProductRow, index: number): Product {
-  const fallback =
-    PRODUCTS.find((product) => product.id === getString(row, ['id', 'slug', 'code'])) ??
-    PRODUCTS[index % PRODUCTS.length]
-  const availability = getString(row, ['availability', 'stock_status', 'status_type'])
-  const statusTone = getString(row, ['statusTone', 'status_tone'])
-  const unitMode = getString(row, ['unitMode', 'unit_mode', 'unit'])
-  const inStock = row.in_stock ?? row.inStock
-
-  return {
-    ...fallback,
-    id: getString(row, ['id', 'slug', 'code']) ?? fallback.id,
-    name: getString(row, ['name', 'title']) ?? fallback.name,
-    subtitle: getString(row, ['subtitle', 'description', 'grade']) ?? fallback.subtitle,
-    image: getString(row, ['image', 'image_url', 'imageUrl', 'photo_url']) ?? fallback.image,
-    statusEmoji: getString(row, ['statusEmoji', 'status_emoji']) ?? fallback.statusEmoji,
-    statusText: getString(row, ['statusText', 'status_text', 'status']) ?? fallback.statusText,
-    statusTone: isStatusTone(statusTone) ? statusTone : fallback.statusTone,
-    availability: isAvailability(availability)
-      ? availability
-      : typeof inStock === 'boolean'
-        ? inStock
-          ? 'warehouse'
-          : 'transit'
-        : fallback.availability,
-    basePrice: getNumber(row, ['basePrice', 'base_price', 'price', 'price_per_kg']) ?? fallback.basePrice,
-    minOrder: getString(row, ['minOrder', 'min_order']) ?? fallback.minOrder,
-    location: getString(row, ['location', 'warehouse']) ?? fallback.location,
-    bookingNote: getString(row, ['bookingNote', 'booking_note']) ?? fallback.bookingNote,
-    unitMode: isUnitMode(unitMode) ? unitMode : fallback.unitMode,
-    sliderMin: getNumber(row, ['sliderMin', 'slider_min', 'min_volume']) ?? fallback.sliderMin,
-    sliderMax: getNumber(row, ['sliderMax', 'slider_max', 'max_volume']) ?? fallback.sliderMax,
-    sliderStep: getNumber(row, ['sliderStep', 'slider_step', 'volume_step']) ?? fallback.sliderStep,
-    defaultVolume:
-      getNumber(row, ['defaultVolume', 'default_volume', 'default_order']) ?? fallback.defaultVolume,
-    analyticsTitle:
-      getString(row, ['analyticsTitle', 'analytics_title']) ?? fallback.analyticsTitle,
-    analyticsText: getString(row, ['analyticsText', 'analytics_text']) ?? fallback.analyticsText,
-    trackSteps: getStringArray(row, ['trackSteps', 'track_steps']) ?? fallback.trackSteps,
-    trackCurrent:
-      getNumber(row, ['trackCurrent', 'track_current']) ?? fallback.trackCurrent,
-    retailStockKg:
-      getNumber(row, ['retailStockKg', 'retail_stock_kg', 'stock_kg']) ?? fallback.retailStockKg,
-  }
 }
 
 function getCartLines(cart: Cart, products: Product[], isB2B: boolean): CartLine[] {
@@ -466,7 +356,7 @@ function getCartTotalTons(lines: CartLine[]): number {
 function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
   const itemLines = lines.map(
     (line) =>
-      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume, isB2B)} (Итого: ${formatMoney(line.total)} ₸)`,
+      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume, isB2B)} (Итого: ${formatCurrency(line.total)})`,
   )
   const totalTons = getCartTotalTons(lines)
   const tonsLabel =
@@ -475,8 +365,8 @@ function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: 
       : null
 
   const summary = tonsLabel
-    ? `Всего: ${tonsLabel} на общую сумму ${formatMoney(grandTotal)} ₸.`
-    : `Общая сумма заказа: ${formatMoney(grandTotal)} ₸.`
+    ? `Всего: ${tonsLabel} на общую сумму ${formatCurrency(grandTotal)}.`
+    : `Общая сумма заказа: ${formatCurrency(grandTotal)}.`
 
   return [
     'Здравствуйте! Хочу забронировать овощи:',
@@ -506,9 +396,8 @@ function matchesSearch(product: Product, query: string): boolean {
 
 function getProductWarehouseId(product: Product): WarehouseFilterId | 'transit' {
   if (product.availability === 'transit') return 'transit'
-  if (product.location.startsWith('Склад №1')) return 'warehouse1'
-  if (product.location.startsWith('Склад №2')) return 'warehouse2'
-  return 'transit'
+  if (product.location.includes('2')) return 'warehouse2'
+  return 'warehouse1'
 }
 
 function matchesWarehouse(product: Product, warehouse: WarehouseFilterId): boolean {
@@ -661,7 +550,7 @@ function ProductSkeleton() {
 
 export default function App() {
   const today = useMemo(() => formatDateRu(new Date()), [])
-  const [products, setProducts] = useState<Product[]>(PRODUCTS)
+  const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsError, setProductsError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('all')
@@ -682,35 +571,26 @@ export default function App() {
   const [showMyOrders, setShowMyOrders] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
-    Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
+    Object.fromEntries(fallbackProducts.map((p) => [p.id, p.defaultVolume])),
   )
-  useEffect(() => {
-    let isMounted = true
 
-    async function loadProducts() {
-      setProductsLoading(true)
-      setProductsError(null)
+  const loadProducts = async () => {
+    setProductsLoading(true)
+    setProductsError(null)
 
-      const { data, error } = await supabase.from('products').select('*')
-
-      if (!isMounted) return
-
-      if (error) {
-        setProducts(PRODUCTS)
-        setProductsError(error.message)
-      } else {
-        const nextProducts = data?.map((row, index) => normalizeProduct(row, index)) ?? []
-        setProducts(nextProducts.length > 0 ? nextProducts : PRODUCTS)
-      }
-
+    try {
+      const nextProducts = await getProducts()
+      setProducts(nextProducts)
+    } catch (error) {
+      setProducts([])
+      setProductsError(getErrorMessage(error))
+    } finally {
       setProductsLoading(false)
     }
+  }
 
+  useEffect(() => {
     loadProducts()
-
-    return () => {
-      isMounted = false
-    }
   }, [])
 
   useEffect(() => {
@@ -1085,9 +965,16 @@ export default function App() {
         )}
 
         {productsError && (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">
-            Products could not be loaded from Supabase. Showing local catalog. {productsError}
-          </p>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">
+            <p>Не удалось загрузить товары из Supabase. {productsError}</p>
+            <button
+              type="button"
+              onClick={loadProducts}
+              className="mt-3 rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-700 active:scale-95"
+            >
+              Повторить
+            </button>
+          </div>
         )}
 
         {isLoading || productsLoading ? (
@@ -1120,17 +1007,29 @@ export default function App() {
               className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
             >
               <div className="group relative h-48 w-full overflow-hidden bg-slate-200">
-                <img
-                  src={product.image}
-                  alt={product.name}
-                  className="h-48 w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                {product.image ? (
+                  <>
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      className="h-48 w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                  </>
+                ) : (
+                  <div className="flex h-full items-center justify-center bg-slate-100 px-8 text-center text-sm font-semibold text-slate-500">
+                    Фото товара скоро будет добавлено
+                  </div>
+                )}
                 <div className="absolute bottom-4 left-4 right-4">
-                  <p className="text-xs font-medium text-white/90">{product.subtitle}</p>
-                  <h2 className="text-2xl font-bold text-white">{product.name}</h2>
+                  <p className={`text-xs font-medium ${product.image ? 'text-white/90' : 'text-slate-600'}`}>
+                    {product.subtitle}
+                  </p>
+                  <h2 className={`text-2xl font-bold ${product.image ? 'text-white' : 'text-slate-900'}`}>
+                    {product.name}
+                  </h2>
                 </div>
                 {inCart && (
                   <span className="absolute right-3 top-3 rounded-full bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
@@ -1143,7 +1042,6 @@ export default function App() {
                 <div
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium ${statusToneClass[product.statusTone]}`}
                 >
-                  <span aria-hidden>{product.statusEmoji}</span>
                   {product.statusText}
                 </div>
 
@@ -1156,12 +1054,12 @@ export default function App() {
                       {hasDiscount ? (
                         <>
                           <span className="mr-2 text-base font-normal text-slate-400 line-through">
-                            {product.basePrice} ₸/кг
+                            {formatCurrency(product.basePrice)}/кг
                           </span>
-                          {Math.round(pricePerKg)} ₸/кг
+                          {formatCurrency(pricePerKg)}/кг
                         </>
                       ) : (
-                        <>{Math.round(pricePerKg)} ₸/кг</>
+                        <>{formatCurrency(pricePerKg)}/кг</>
                       )}
                     </p>
                   </div>
@@ -1305,11 +1203,11 @@ export default function App() {
                             />
                             <div className="mt-1 flex justify-between text-[11px] text-slate-400">
                               <span>
-                                {cfg.unitMode === 'tons' ? `${cfg.sliderMin} т` : `${cfg.sliderMin} кг`}
+                                {cfg.unitMode === 'tons' ? `${cfg.sliderMin} С‚` : `${cfg.sliderMin} кг`}
                               </span>
                               <span className="text-slate-500">{formatVolumeLabel(product, volume, true)}</span>
                               <span>
-                                {cfg.unitMode === 'tons' ? `${cfg.sliderMax} т` : `${cfg.sliderMax} кг`}
+                                {cfg.unitMode === 'tons' ? `${cfg.sliderMax} С‚` : `${cfg.sliderMax} кг`}
                               </span>
                             </div>
                           </>
@@ -1347,7 +1245,7 @@ export default function App() {
                     }`}
                   >
                     Итого за {formatVolumeLabel(product, volume, isB2B)}:{' '}
-                    <span className="tabular-nums">{formatMoney(total)} ₸</span>
+                    <span className="tabular-nums">{formatCurrency(total)}</span>
                   </p>
                   {hasDiscount && (
                     <p className="mt-1 text-center text-xs font-medium text-emerald-600">
@@ -1377,7 +1275,7 @@ export default function App() {
       </main>
 
       <footer className="px-4 pt-6 text-center text-xs text-slate-500">
-        Оптово-розничная витрина · Уральск, Казахстан · Цены в тенге (₸)
+        Оптово-розничная витрина · Уральск, Казахстан · Цены в тенге
       </footer>
 
       {cartCount > 0 && (
@@ -1448,11 +1346,17 @@ export default function App() {
                       key={line.product.id}
                       className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
                     >
-                      <img
-                        src={line.product.image}
-                        alt=""
-                        className="h-16 w-16 shrink-0 rounded-lg object-cover"
-                      />
+                      {line.product.image ? (
+                        <img
+                          src={line.product.image}
+                          alt=""
+                          className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
+                          Фото скоро
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <p className="font-semibold text-slate-800">{line.product.name}</p>
@@ -1467,7 +1371,7 @@ export default function App() {
                         </div>
                         <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
                         <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
-                          {formatMoney(line.total)} ₸
+                          {formatCurrency(line.total)}
                         </p>
                       </div>
                     </li>
@@ -1481,7 +1385,7 @@ export default function App() {
                 <p className="mb-3 text-center text-lg font-bold text-slate-800">
                   Итого к оплате:{' '}
                   <span className="tabular-nums text-brand-800">
-                    {formatMoney(cartGrandTotal)} ₸
+                    {formatCurrency(cartGrandTotal)}
                   </span>
                 </p>
                 <button
@@ -1554,7 +1458,7 @@ export default function App() {
                     const product = products.find((p) => p.id === order.productId)
                     const volumeLabel = product
                       ? formatOrderVolume(product, order.volume)
-                      : `${order.volume} т`
+                      : `${order.volume} С‚`
                     const isRepeated = repeatedOrderId === order.id
 
                     return (
@@ -1612,7 +1516,7 @@ export default function App() {
                                   <p className="mt-1 text-sm text-slate-600">{so.items.map(i => `${i.productName} (${i.volumeLabel})`).join(', ')}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="font-bold text-brand-800">{formatMoney(so.total)} ₸</p>
+                                  <p className="font-bold text-brand-800">{formatCurrency(so.total)}</p>
                                   <p className="text-xs text-slate-500">{so.status}</p>
                                 </div>
                               </div>
