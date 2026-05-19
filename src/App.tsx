@@ -20,7 +20,8 @@ import {
 import { getErrorMessage, getProducts } from './services/products'
 import type { Product } from './types/product'
 
-const WHATSAPP_PHONE = '77774681889'
+// TODO: replace with the real WhatsApp phone number for orders.
+const WHATSAPP_PHONE = '77000000000'
 const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
 
 type TabId = 'all' | 'warehouse' | 'transit'
@@ -251,34 +252,38 @@ function getDiscountPercent(volume: number, min: number, max: number): number {
   return 5 + ratio * 2
 }
 
-function getWeightKg(product: Product, volume: number, isB2B = true): number {
-  const displayUnit = isB2B ? product.unitMode : 'kg'
-  return displayUnit === 'tons' ? volume * 1000 : volume
+function getWeightKg(_product: Product, volume: number, _isB2B = true): number {
+  return volume
 }
 
 function getProductDisplayConfig(product: Product, isB2B: boolean) {
+  const minOrder = Math.max(1, product.min_order ?? product.sliderMin ?? 1)
+
   if (isB2B) {
+    const sliderMax = Math.max(minOrder * 10, minOrder + 100)
+
     return {
-      unitMode: product.unitMode,
-      sliderMin: product.sliderMin,
-      sliderMax: product.sliderMax,
-      sliderStep: product.sliderStep,
-      defaultVolume: product.defaultVolume,
+      unitMode: 'kg' as const,
+      sliderMin: minOrder,
+      sliderMax,
+      sliderStep: 1,
+      defaultVolume: minOrder,
     }
   }
 
+  const sliderMax = Math.max(10, minOrder)
+
   return {
     unitMode: 'kg' as const,
-    sliderMin: RETAIL_MIN_ORDER_KG,
-    sliderMax: 50,
+    sliderMin: 1,
+    sliderMax,
     sliderStep: 1,
-    defaultVolume: 10,
+    defaultVolume: Math.min(5, sliderMax),
   }
 }
 
-function getVolumeUnit(product: Product, isB2B = true): string {
-  const unitMode = isB2B ? product.unitMode : 'kg'
-  return unitMode === 'tons' ? 'т' : 'кг'
+function getVolumeUnit(_product: Product, _isB2B = true): string {
+  return 'кг'
 }
 
 function snapVolume(value: number, product: Product, isB2B = true): number {
@@ -290,31 +295,21 @@ function snapVolume(value: number, product: Product, isB2B = true): number {
   return Number(stepped.toFixed(decimals))
 }
 
-function formatVolumeLabel(product: Product, volume: number, isB2B = true): string {
-  const unitMode = isB2B ? product.unitMode : 'kg'
-  if (unitMode === 'tons') {
-    const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
-    return `${label} ${volume === 1 ? 'тонна' : volume < 5 ? 'тонны' : 'тонн'}`
-  }
+function formatVolumeLabel(_product: Product, volume: number, _isB2B = true): string {
   return `${formatMoney(volume)} кг`
 }
 
 function formatVolumeWhatsApp(product: Product, volume: number, isB2B = true): string {
-  const unitMode = isB2B ? product.unitMode : 'kg'
-  if (unitMode === 'tons') {
-    const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
-    return `${label} тонн`
-  }
+  return formatVolumeLabel(product, volume, isB2B)
+}
+
+function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
   return `${formatMoney(volume)} кг`
 }
 
-function formatOrderVolume(product: Product, volume: number, isB2B = true): string {
-  const unitMode = isB2B ? product.unitMode : 'kg'
-  if (unitMode === 'tons') {
-    const label = Number.isInteger(volume) ? String(volume) : volume.toFixed(1)
-    return `${label} С‚`
-  }
-  return `${formatMoney(volume)} кг`
+function formatSliderLabel(value: number, unitMode: 'tons' | 'kg'): string {
+  const label = Number.isInteger(value) ? String(value) : value.toFixed(1)
+  return `${label} ${unitMode === 'tons' ? 'т' : 'кг'}`
 }
 
 function calcPricing(product: Product, volume: number, isB2B = true) {
@@ -346,40 +341,26 @@ function getCartLines(cart: Cart, products: Product[], isB2B: boolean): CartLine
     .filter((line): line is CartLine => line !== null)
 }
 
-function getCartTotalTons(lines: CartLine[]): number {
-  return lines.reduce((sum, line) => {
-    if (line.product.unitMode === 'tons') return sum + line.volume
-    return sum
-  }, 0)
-}
-
 function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
-  const itemLines = lines.map(
-    (line) =>
-      `- ${line.product.name}: ${formatVolumeWhatsApp(line.product, line.volume, isB2B)} (Итого: ${formatCurrency(line.total)})`,
-  )
-  const totalTons = getCartTotalTons(lines)
-  const tonsLabel =
-    totalTons > 0
-      ? `${Number.isInteger(totalTons) ? totalTons : totalTons.toFixed(1)} тонн`
-      : null
-
-  const summary = tonsLabel
-    ? `Всего: ${tonsLabel} на общую сумму ${formatCurrency(grandTotal)}.`
-    : `Общая сумма заказа: ${formatCurrency(grandTotal)}.`
+  const itemLines = lines.map((line, index) => {
+    const { pricePerKg } = calcPricing(line.product, line.volume, isB2B)
+    const quantity = formatVolumeWhatsApp(line.product, line.volume, isB2B)
+    return `${index + 1}. ${line.product.name} — ${quantity} × ${formatCurrency(pricePerKg)} = ${formatCurrency(line.total)}`
+  })
 
   return [
-    'Здравствуйте! Хочу забронировать овощи:',
+    'Здравствуйте! Хочу оформить заказ:',
     ...itemLines,
-    summary,
-    `Мой номер в системе: ${PROFILE_PHONE}`,
+    `Итого: ${formatCurrency(grandTotal)}`,
+    `Режим: ${isB2B ? 'опт' : 'розница'}`,
   ].join('\n')
 }
 
-function openCartWhatsApp(lines: CartLine[], grandTotal: number, isB2B: boolean) {
+function openCartWhatsApp(lines: CartLine[], grandTotal: number, isB2B: boolean): boolean {
   const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B)
-  const url = `https://api.whatsapp.com/send?phone=${WHATSAPP_PHONE}&text=${encodeURIComponent(text)}`
-  window.open(url, '_blank', 'noopener,noreferrer')
+  const url = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
+  const popup = window.open(url, '_blank')
+  return popup !== null
 }
 
 function matchesTab(product: Product, tab: TabId): boolean {
@@ -736,6 +717,9 @@ export default function App() {
   const handleBookCart = () => {
     if (cartLines.length === 0) return
 
+    const whatsappOpened = openCartWhatsApp(cartLines, cartGrandTotal, isB2B)
+    if (!whatsappOpened) return
+
     const order: SavedOrder = {
       userName: orderName.trim() || undefined,
       createdAt: new Date().toISOString(),
@@ -751,8 +735,8 @@ export default function App() {
     }
 
     saveOrderToStorage(order)
-    openCartWhatsApp(cartLines, cartGrandTotal, isB2B)
     clearCart()
+    setCartOpen(false)
   }
 
   const handleRepeatLastOrder = () => {
@@ -1000,13 +984,23 @@ export default function App() {
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
           const analyticsActionClass = 'bg-white text-emerald-700'
+          const productTitle = product.image ? null : (
+            <div className="px-5 pt-5">
+              <p className="text-xs font-medium text-slate-500">{product.subtitle}</p>
+              <h2 className="text-2xl font-bold text-slate-900">{product.name}</h2>
+            </div>
+          )
 
           return (
             <article
               key={product.id}
               className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
             >
-              <div className="group relative h-48 w-full overflow-hidden bg-slate-200">
+              <div
+                className={`group relative w-full overflow-hidden bg-slate-200 ${
+                  product.image ? 'h-48' : 'h-28'
+                }`}
+              >
                 {product.image ? (
                   <>
                     <img
@@ -1019,11 +1013,11 @@ export default function App() {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                   </>
                 ) : (
-                  <div className="flex h-full items-center justify-center bg-slate-100 px-8 text-center text-sm font-semibold text-slate-500">
+                  <div className="flex h-full items-center justify-center bg-slate-50 px-8 text-center text-sm font-semibold text-slate-500">
                     Фото товара скоро будет добавлено
                   </div>
                 )}
-                <div className="absolute bottom-4 left-4 right-4">
+                <div className={product.image ? 'absolute bottom-4 left-4 right-4' : 'sr-only'}>
                   <p className={`text-xs font-medium ${product.image ? 'text-white/90' : 'text-slate-600'}`}>
                     {product.subtitle}
                   </p>
@@ -1037,6 +1031,8 @@ export default function App() {
                   </span>
                 )}
               </div>
+
+              {productTitle}
 
               <div className="space-y-4 p-5">
                 <div
@@ -1202,13 +1198,11 @@ export default function App() {
                               aria-label={`Ползунок объёма: ${product.name}`}
                             />
                             <div className="mt-1 flex justify-between text-[11px] text-slate-400">
-                              <span>
-                                {cfg.unitMode === 'tons' ? `${cfg.sliderMin} С‚` : `${cfg.sliderMin} кг`}
+                              <span>{formatSliderLabel(cfg.sliderMin, cfg.unitMode)}</span>
+                              <span className="text-slate-500">
+                                {formatSliderLabel((cfg.sliderMin + cfg.sliderMax) / 2, cfg.unitMode)}
                               </span>
-                              <span className="text-slate-500">{formatVolumeLabel(product, volume, true)}</span>
-                              <span>
-                                {cfg.unitMode === 'tons' ? `${cfg.sliderMax} С‚` : `${cfg.sliderMax} кг`}
-                              </span>
+                              <span>{formatSliderLabel(cfg.sliderMax, cfg.unitMode)}</span>
                             </div>
                           </>
                         )
@@ -1226,7 +1220,7 @@ export default function App() {
                           <RetailQuantityInput
                             value={volume}
                             min={cfg.sliderMin}
-                            stock={product.retailStockKg ?? cfg.sliderMax}
+                            stock={cfg.sliderMax}
                             productName={product.name}
                             onChange={(nextVolume) => {
                               setVolumes((prev) => ({
@@ -1458,7 +1452,7 @@ export default function App() {
                     const product = products.find((p) => p.id === order.productId)
                     const volumeLabel = product
                       ? formatOrderVolume(product, order.volume)
-                      : `${order.volume} С‚`
+                      : `${order.volume} кг`
                     const isRepeated = repeatedOrderId === order.id
 
                     return (
