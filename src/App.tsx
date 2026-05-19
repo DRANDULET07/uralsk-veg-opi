@@ -17,6 +17,7 @@ import {
   User,
   X,
 } from 'lucide-react'
+import { supabase } from './lib/supabaseClient'
 
 const WHATSAPP_PHONE = '77774681889'
 const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
@@ -90,6 +91,7 @@ const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 5
+type ProductRow = Record<string, unknown>
 
 const PRODUCTS: Product[] = [
   {
@@ -350,10 +352,98 @@ function calcPricing(product: Product, volume: number, isB2B = true) {
   return { weightKg, discount, pricePerKg, total }
 }
 
-function getCartLines(cart: Cart, isB2B: boolean): CartLine[] {
+function getString(row: ProductRow, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return undefined
+}
+
+function getNumber(row: ProductRow, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return undefined
+}
+
+function getStringArray(row: ProductRow, keys: string[]): string[] | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+      return value
+    }
+  }
+  return undefined
+}
+
+function isStatusTone(value: string | undefined): value is Product['statusTone'] {
+  return value === 'fresh' || value === 'stock' || value === 'transit'
+}
+
+function isAvailability(value: string | undefined): value is Product['availability'] {
+  return value === 'warehouse' || value === 'transit'
+}
+
+function isUnitMode(value: string | undefined): value is Product['unitMode'] {
+  return value === 'tons' || value === 'kg'
+}
+
+function normalizeProduct(row: ProductRow, index: number): Product {
+  const fallback =
+    PRODUCTS.find((product) => product.id === getString(row, ['id', 'slug', 'code'])) ??
+    PRODUCTS[index % PRODUCTS.length]
+  const availability = getString(row, ['availability', 'stock_status', 'status_type'])
+  const statusTone = getString(row, ['statusTone', 'status_tone'])
+  const unitMode = getString(row, ['unitMode', 'unit_mode', 'unit'])
+  const inStock = row.in_stock ?? row.inStock
+
+  return {
+    ...fallback,
+    id: getString(row, ['id', 'slug', 'code']) ?? fallback.id,
+    name: getString(row, ['name', 'title']) ?? fallback.name,
+    subtitle: getString(row, ['subtitle', 'description', 'grade']) ?? fallback.subtitle,
+    image: getString(row, ['image', 'image_url', 'imageUrl', 'photo_url']) ?? fallback.image,
+    statusEmoji: getString(row, ['statusEmoji', 'status_emoji']) ?? fallback.statusEmoji,
+    statusText: getString(row, ['statusText', 'status_text', 'status']) ?? fallback.statusText,
+    statusTone: isStatusTone(statusTone) ? statusTone : fallback.statusTone,
+    availability: isAvailability(availability)
+      ? availability
+      : typeof inStock === 'boolean'
+        ? inStock
+          ? 'warehouse'
+          : 'transit'
+        : fallback.availability,
+    basePrice: getNumber(row, ['basePrice', 'base_price', 'price', 'price_per_kg']) ?? fallback.basePrice,
+    minOrder: getString(row, ['minOrder', 'min_order']) ?? fallback.minOrder,
+    location: getString(row, ['location', 'warehouse']) ?? fallback.location,
+    bookingNote: getString(row, ['bookingNote', 'booking_note']) ?? fallback.bookingNote,
+    unitMode: isUnitMode(unitMode) ? unitMode : fallback.unitMode,
+    sliderMin: getNumber(row, ['sliderMin', 'slider_min', 'min_volume']) ?? fallback.sliderMin,
+    sliderMax: getNumber(row, ['sliderMax', 'slider_max', 'max_volume']) ?? fallback.sliderMax,
+    sliderStep: getNumber(row, ['sliderStep', 'slider_step', 'volume_step']) ?? fallback.sliderStep,
+    defaultVolume:
+      getNumber(row, ['defaultVolume', 'default_volume', 'default_order']) ?? fallback.defaultVolume,
+    analyticsTitle:
+      getString(row, ['analyticsTitle', 'analytics_title']) ?? fallback.analyticsTitle,
+    analyticsText: getString(row, ['analyticsText', 'analytics_text']) ?? fallback.analyticsText,
+    trackSteps: getStringArray(row, ['trackSteps', 'track_steps']) ?? fallback.trackSteps,
+    trackCurrent:
+      getNumber(row, ['trackCurrent', 'track_current']) ?? fallback.trackCurrent,
+    retailStockKg:
+      getNumber(row, ['retailStockKg', 'retail_stock_kg', 'stock_kg']) ?? fallback.retailStockKg,
+  }
+}
+
+function getCartLines(cart: Cart, products: Product[], isB2B: boolean): CartLine[] {
   return Object.entries(cart)
     .map(([productId, volume]) => {
-      const product = PRODUCTS.find((p) => p.id === productId)
+      const product = products.find((p) => p.id === productId)
       if (!product) return null
       const { total } = calcPricing(product, volume, isB2B)
       return {
@@ -571,6 +661,9 @@ function ProductSkeleton() {
 
 export default function App() {
   const today = useMemo(() => formatDateRu(new Date()), [])
+  const [products, setProducts] = useState<Product[]>(PRODUCTS)
+  const [productsLoading, setProductsLoading] = useState(true)
+  const [productsError, setProductsError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilterId>('all')
@@ -591,6 +684,47 @@ export default function App() {
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(PRODUCTS.map((p) => [p.id, p.defaultVolume])),
   )
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadProducts() {
+      setProductsLoading(true)
+      setProductsError(null)
+
+      const { data, error } = await supabase.from('products').select('*')
+
+      if (!isMounted) return
+
+      if (error) {
+        setProducts(PRODUCTS)
+        setProductsError(error.message)
+      } else {
+        const nextProducts = data?.map((row, index) => normalizeProduct(row, index)) ?? []
+        setProducts(nextProducts.length > 0 ? nextProducts : PRODUCTS)
+      }
+
+      setProductsLoading(false)
+    }
+
+    loadProducts()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    setVolumes((prev) => ({
+      ...Object.fromEntries(
+        products.map((product) => [
+          product.id,
+          getProductDisplayConfig(product, isB2B).defaultVolume,
+        ]),
+      ),
+      ...prev,
+    }))
+  }, [isB2B, products])
+
   useEffect(() => {
     const storedLastOrder = localStorage.getItem(LOCAL_STORAGE_LAST_ORDER)
     const storedHistory = localStorage.getItem(LOCAL_STORAGE_HISTORY)
@@ -619,7 +753,7 @@ export default function App() {
   useEffect(() => {
     setVolumes(
       Object.fromEntries(
-        PRODUCTS.map((product) => {
+        products.map((product) => {
           const config = getProductDisplayConfig(product, isB2B)
           return [product.id, config.defaultVolume]
         }),
@@ -628,17 +762,17 @@ export default function App() {
     setCart((prev) =>
       Object.fromEntries(
         Object.entries(prev).map(([productId, volume]) => {
-          const product = PRODUCTS.find((p) => p.id === productId)
+          const product = products.find((p) => p.id === productId)
           return [productId, product ? snapVolume(volume, product, isB2B) : volume]
         }),
       ),
     )
-  }, [isB2B])
+  }, [isB2B, products])
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
   const filteredProducts = useMemo(() => {
-    const list = PRODUCTS.filter(
+    const list = products.filter(
       (p) =>
         matchesTab(p, activeTab) &&
         matchesSearch(p, normalizedSearch) &&
@@ -646,9 +780,9 @@ export default function App() {
         matchesInStockOnly(p, onlyInStock),
     )
     return sortProducts(list, sortBy)
-  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, sortBy])
+  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, products, sortBy])
 
-  const cartLines = useMemo(() => getCartLines(cart, isB2B), [cart, isB2B])
+  const cartLines = useMemo(() => getCartLines(cart, products, isB2B), [cart, isB2B, products])
   const cartCount = cartLines.length
   const cartGrandTotal = useMemo(
     () => cartLines.reduce((sum, line) => sum + line.total, 0),
@@ -691,7 +825,7 @@ export default function App() {
   }
 
   const handleRepeatOrder = (order: MockOrder) => {
-    const product = PRODUCTS.find((p) => p.id === order.productId)
+    const product = products.find((p) => p.id === order.productId)
     if (!product) return
 
     setProductVolume(product, order.volume)
@@ -950,7 +1084,13 @@ export default function App() {
           </section>
         )}
 
-        {isLoading ? (
+        {productsError && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">
+            Products could not be loaded from Supabase. Showing local catalog. {productsError}
+          </p>
+        )}
+
+        {isLoading || productsLoading ? (
           <div className="space-y-4">
             {[...Array(4)].map((_, index) => (
               <ProductSkeleton key={index} />
@@ -1411,7 +1551,7 @@ export default function App() {
                 </div>
                 <ul className="space-y-3">
                   {MOCK_ORDERS.map((order) => {
-                    const product = PRODUCTS.find((p) => p.id === order.productId)
+                    const product = products.find((p) => p.id === order.productId)
                     const volumeLabel = product
                       ? formatOrderVolume(product, order.volume)
                       : `${order.volume} т`
