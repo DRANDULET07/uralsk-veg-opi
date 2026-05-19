@@ -1,37 +1,39 @@
-create extension if not exists pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-create table if not exists public.products (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
+CREATE TABLE IF NOT EXISTS public.products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
   category text,
   image text,
-  wholesale_price numeric not null,
-  retail_price numeric not null,
-  unit text default 'кг',
-  min_order numeric default 1,
+  wholesale_price numeric NOT NULL,
+  retail_price numeric NOT NULL,
+  unit text DEFAULT 'кг',
+  min_order numeric DEFAULT 1,
   status text,
   freshness text,
   location text,
   description text,
   origin text,
-  in_stock boolean default true,
-  stock_amount numeric default 0,
-  is_in_transit boolean default false,
+  in_stock boolean DEFAULT true,
+  stock_amount numeric DEFAULT 0,
+  is_in_transit boolean DEFAULT false,
   delivery_eta text,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
 );
 
-alter table public.products enable row level security;
+ALTER TABLE public.products
+  ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Allow public read access to products" on public.products;
+DROP POLICY IF EXISTS "Allow public read access to products"
+  ON public.products;
 
-create policy "Allow public read access to products"
-  on public.products
-  for select
-  using (true);
+CREATE POLICY "Allow public read access to products"
+  ON public.products
+  FOR SELECT
+  USING (true);
 
-insert into public.products (
+INSERT INTO public.products (
   name,
   category,
   image,
@@ -48,7 +50,7 @@ insert into public.products (
   stock_amount,
   is_in_transit,
   delivery_eta
-) values
+) VALUES
   (
     'Картофель',
     'Местный, КХ',
@@ -67,6 +69,7 @@ insert into public.products (
     false,
     null
   ),
+
   (
     'Лук репчатый',
     'Оптовая партия',
@@ -85,6 +88,7 @@ insert into public.products (
     false,
     null
   ),
+
   (
     'Морковь',
     'Мытая',
@@ -103,6 +107,7 @@ insert into public.products (
     true,
     'Ожидается завтра'
   ),
+
   (
     'Томаты',
     'Тепличные',
@@ -121,6 +126,7 @@ insert into public.products (
     false,
     null
   ),
+
   (
     'Капуста',
     'Белокочанная',
