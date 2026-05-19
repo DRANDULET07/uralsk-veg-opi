@@ -359,8 +359,8 @@ function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: 
 function openCartWhatsApp(lines: CartLine[], grandTotal: number, isB2B: boolean): boolean {
   const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B)
   const url = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
-  const popup = window.open(url, '_blank')
-  return popup !== null
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  return opened !== null
 }
 
 function matchesTab(product: Product, tab: TabId): boolean {
@@ -542,6 +542,7 @@ export default function App() {
   const [isB2B, setIsB2B] = useState(true)
   const [profileOpen, setProfileOpen] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
+  const [cartError, setCartError] = useState<string | null>(null)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
   const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
@@ -665,6 +666,7 @@ export default function App() {
 
   const addToCart = (product: Product) => {
     const selected = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
+    setCartError(null)
     setCart((prev) => {
       const current = prev[product.id] ?? 0
       const nextVolume = current > 0 ? current + selected : selected
@@ -678,6 +680,7 @@ export default function App() {
   }
 
   const removeFromCart = (productId: string) => {
+    setCartError(null)
     setCart((prev) => {
       const next = { ...prev }
       delete next[productId]
@@ -703,6 +706,7 @@ export default function App() {
   }
 
   const clearCart = () => {
+    setCartError(null)
     setCart({})
   }
 
@@ -716,9 +720,15 @@ export default function App() {
 
   const handleBookCart = () => {
     if (cartLines.length === 0) return
+    setCartError(null)
 
     const whatsappOpened = openCartWhatsApp(cartLines, cartGrandTotal, isB2B)
-    if (!whatsappOpened) return
+    if (!whatsappOpened) {
+      setCartError(
+        'Браузер заблокировал открытие WhatsApp. Разрешите всплывающие окна или попробуйте ещё раз.',
+      )
+      return
+    }
 
     const order: SavedOrder = {
       userName: orderName.trim() || undefined,
@@ -1376,6 +1386,11 @@ export default function App() {
 
             {cartLines.length > 0 && (
               <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+                {cartError && (
+                  <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
+                    {cartError}
+                  </p>
+                )}
                 <p className="mb-3 text-center text-lg font-bold text-slate-800">
                   Итого к оплате:{' '}
                   <span className="tabular-nums text-brand-800">
