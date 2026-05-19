@@ -20,8 +20,7 @@ import {
 import { getErrorMessage, getProducts } from './services/products'
 import type { Product } from './types/product'
 
-// TODO: replace with the real WhatsApp phone number for orders.
-const WHATSAPP_PHONE = '77000000000'
+const WHATSAPP_PHONE = '77774681889'
 const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
 
 type TabId = 'all' | 'warehouse' | 'transit'
@@ -299,8 +298,14 @@ function formatVolumeLabel(_product: Product, volume: number, _isB2B = true): st
   return `${formatMoney(volume)} кг`
 }
 
-function formatVolumeWhatsApp(product: Product, volume: number, isB2B = true): string {
-  return formatVolumeLabel(product, volume, isB2B)
+function formatVolumeWhatsApp(_product: Product, volume: number, isB2B = true): string {
+  if (isB2B) {
+    const tons = volume / 1000
+    const label = Number.isInteger(tons) ? String(tons) : tons.toFixed(1)
+    return `${label} тонн`
+  }
+
+  return `${formatMoney(volume)} кг`
 }
 
 function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
@@ -342,25 +347,29 @@ function getCartLines(cart: Cart, products: Product[], isB2B: boolean): CartLine
 }
 
 function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
-  const itemLines = lines.map((line, index) => {
-    const { pricePerKg } = calcPricing(line.product, line.volume, isB2B)
+  const itemLines = lines.map((line) => {
     const quantity = formatVolumeWhatsApp(line.product, line.volume, isB2B)
-    return `${index + 1}. ${line.product.name} — ${quantity} × ${formatCurrency(pricePerKg)} = ${formatCurrency(line.total)}`
+    return `- ${line.product.name}: ${quantity} (Итого: ${formatCurrency(line.total)})`
   })
 
+  const totalVolume = lines.reduce((sum, line) => sum + line.volume, 0)
+  const volumeLabel = isB2B
+    ? `${Number.isInteger(totalVolume / 1000) ? totalVolume / 1000 : (totalVolume / 1000).toFixed(1)} тонн`
+    : `${formatMoney(totalVolume)} кг`
+
   return [
-    'Здравствуйте! Хочу оформить заказ:',
+    'Здравствуйте! Хочу забронировать овощи:',
+    '',
     ...itemLines,
-    `Итого: ${formatCurrency(grandTotal)}`,
-    `Режим: ${isB2B ? 'опт' : 'розница'}`,
+    '',
+    `Всего: ${volumeLabel} на общую сумму ${formatCurrency(grandTotal)}.`,
+    'Мой номер в системе: не указан',
   ].join('\n')
 }
 
-function openCartWhatsApp(lines: CartLine[], grandTotal: number, isB2B: boolean): boolean {
+function getCartWhatsAppUrl(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
   const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B)
-  const url = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
-  const opened = window.open(url, '_blank', 'noopener,noreferrer')
-  return opened !== null
+  return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
 }
 
 function matchesTab(product: Product, tab: TabId): boolean {
@@ -722,13 +731,7 @@ export default function App() {
     if (cartLines.length === 0) return
     setCartError(null)
 
-    const whatsappOpened = openCartWhatsApp(cartLines, cartGrandTotal, isB2B)
-    if (!whatsappOpened) {
-      setCartError(
-        'Браузер заблокировал открытие WhatsApp. Разрешите всплывающие окна или попробуйте ещё раз.',
-      )
-      return
-    }
+    const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)
 
     const order: SavedOrder = {
       userName: orderName.trim() || undefined,
@@ -745,8 +748,7 @@ export default function App() {
     }
 
     saveOrderToStorage(order)
-    clearCart()
-    setCartOpen(false)
+    window.location.href = whatsappUrl
   }
 
   const handleRepeatLastOrder = () => {
@@ -1387,9 +1389,17 @@ export default function App() {
             {cartLines.length > 0 && (
               <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
                 {cartError && (
-                  <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
                     {cartError}
-                  </p>
+                    <a
+                      href={getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 block font-bold text-amber-950 underline"
+                    >
+                      Открыть WhatsApp вручную
+                    </a>
+                  </div>
                 )}
                 <p className="mb-3 text-center text-lg font-bold text-slate-800">
                   Итого к оплате:{' '}
