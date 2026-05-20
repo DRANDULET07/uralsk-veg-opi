@@ -4,10 +4,12 @@ import {
   CalendarCheck,
   CheckCircle2,
   Leaf,
+  Lock,
   MapPin,
   Minus,
   Package,
   Plus,
+  RefreshCw,
   RotateCcw,
   Scale,
   Search,
@@ -30,6 +32,8 @@ type SortOption = 'default' | 'price-asc' | 'price-desc'
 type CustomerType = 'retail' | 'wholesale' | 'shop' | 'cafe'
 type OrderType = 'retail' | 'wholesale'
 type FulfillmentType = 'pickup' | 'delivery'
+type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
+type AdminStatusFilter = AdminOrderStatus | 'all'
 type Cart = Record<string, number>
 
 interface CartLine {
@@ -75,8 +79,37 @@ interface CheckoutForm {
   comment: string
 }
 
+interface AdminOrderItem {
+  id: string
+  order_id: string
+  product_id: number | null
+  product_name: string
+  quantity_kg: number
+  price_per_kg: number
+  total_amount: number
+  created_at?: string | null
+}
+
+interface AdminOrder {
+  id: string
+  client_id?: string | null
+  customer_name: string
+  customer_phone: string
+  client_type: string
+  order_type: string
+  receiving_type: string
+  delivery_address?: string | null
+  comment?: string | null
+  total_weight_kg: number
+  total_amount: number
+  status: AdminOrderStatus
+  created_at: string
+  items: AdminOrderItem[]
+}
+
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
+const ADMIN_PASSWORD = 'admin123'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 1
 const WHOLESALE_MIN_ORDER_KG = 25
@@ -97,6 +130,21 @@ const FULFILLMENT_LABELS: Record<FulfillmentType, string> = {
   pickup: 'Самовывоз',
   delivery: 'Доставка',
 }
+
+const ADMIN_STATUS_LABELS: Record<AdminOrderStatus, string> = {
+  new: 'Новый',
+  processing: 'В работе',
+  completed: 'Выполнен',
+  cancelled: 'Отменён',
+}
+
+const ADMIN_STATUS_OPTIONS: { id: AdminStatusFilter; label: string }[] = [
+  { id: 'all', label: 'Все статусы' },
+  { id: 'new', label: ADMIN_STATUS_LABELS.new },
+  { id: 'processing', label: ADMIN_STATUS_LABELS.processing },
+  { id: 'completed', label: ADMIN_STATUS_LABELS.completed },
+  { id: 'cancelled', label: ADMIN_STATUS_LABELS.cancelled },
+]
 
 const RETAIL_QUICK_QUANTITIES = [1, 3, 5, 10, 25]
 const WHOLESALE_QUICK_QUANTITIES = [25, 50, 100, 500, 1000]
@@ -722,7 +770,394 @@ function ProductSkeleton() {
   )
 }
 
+function normalizeAdminStatus(value: unknown): AdminOrderStatus {
+  return value === 'processing' || value === 'completed' || value === 'cancelled'
+    ? value
+    : 'new'
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function formatAdminDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function AdminPage() {
+  const [password, setPassword] = useState('')
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => sessionStorage.getItem('uralsk_admin_auth') === 'true',
+  )
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [orders, setOrders] = useState<AdminOrder[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersError, setOrdersError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('all')
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+
+  const loadAdminOrders = async () => {
+    setOrdersLoading(true)
+    setOrdersError(null)
+
+    try {
+      const { data: ordersData, error: ordersErrorResult } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (ordersErrorResult) throw ordersErrorResult
+
+      const orderIds = (ordersData ?? []).map((order) => String(order.id))
+      const { data: itemsData, error: itemsError } =
+        orderIds.length > 0
+          ? await supabase.from('order_items').select('*').in('order_id', orderIds)
+          : { data: [], error: null }
+
+      if (itemsError) throw itemsError
+
+      const itemsByOrder = new Map<string, AdminOrderItem[]>()
+      ;(itemsData ?? []).forEach((item) => {
+        const orderId = String(item.order_id)
+        const nextItem: AdminOrderItem = {
+          id: String(item.id),
+          order_id: orderId,
+          product_id: item.product_id === null || item.product_id === undefined ? null : toNumber(item.product_id),
+          product_name: String(item.product_name ?? 'Товар'),
+          quantity_kg: toNumber(item.quantity_kg),
+          price_per_kg: toNumber(item.price_per_kg),
+          total_amount: toNumber(item.total_amount),
+          created_at: typeof item.created_at === 'string' ? item.created_at : null,
+        }
+        itemsByOrder.set(orderId, [...(itemsByOrder.get(orderId) ?? []), nextItem])
+      })
+
+      setOrders(
+        (ordersData ?? []).map((order) => ({
+          id: String(order.id),
+          client_id: order.client_id ? String(order.client_id) : null,
+          customer_name: String(order.customer_name ?? ''),
+          customer_phone: String(order.customer_phone ?? ''),
+          client_type: String(order.client_type ?? ''),
+          order_type: String(order.order_type ?? ''),
+          receiving_type: String(order.receiving_type ?? ''),
+          delivery_address:
+            typeof order.delivery_address === 'string' ? order.delivery_address : null,
+          comment: typeof order.comment === 'string' ? order.comment : null,
+          total_weight_kg: toNumber(order.total_weight_kg),
+          total_amount: toNumber(order.total_amount),
+          status: normalizeAdminStatus(order.status),
+          created_at: String(order.created_at ?? ''),
+          items: itemsByOrder.get(String(order.id)) ?? [],
+        })),
+      )
+    } catch (error) {
+      setOrdersError(getErrorMessage(error))
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      void loadAdminOrders()
+    }
+  }, [isAuthenticated])
+
+  const filteredOrders = useMemo(
+    () =>
+      statusFilter === 'all'
+        ? orders
+        : orders.filter((order) => order.status === statusFilter),
+    [orders, statusFilter],
+  )
+  const totalAmount = filteredOrders.reduce((sum, order) => sum + order.total_amount, 0)
+
+  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (password !== ADMIN_PASSWORD) {
+      setLoginError('Неверный пароль')
+      return
+    }
+
+    sessionStorage.setItem('uralsk_admin_auth', 'true')
+    setIsAuthenticated(true)
+    setLoginError(null)
+  }
+
+  const updateOrderStatus = async (orderId: string, status: AdminOrderStatus) => {
+    setUpdatingOrderId(orderId)
+    setOrdersError(null)
+
+    try {
+      const { error } = await supabase.from('orders').update({ status }).eq('id', orderId)
+      if (error) throw error
+
+      setOrders((prev) =>
+        prev.map((order) => (order.id === orderId ? { ...order, status } : order)),
+      )
+    } catch (error) {
+      setOrdersError(getErrorMessage(error))
+    } finally {
+      setUpdatingOrderId(null)
+    }
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">
+        <form
+          onSubmit={handleLogin}
+          className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/70"
+        >
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+              <Lock className="h-5 w-5" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-brand-900">Админка заказов</h1>
+              <p className="text-sm text-slate-500">Временный вход по паролю</p>
+            </div>
+          </div>
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">Пароль</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                setLoginError(null)
+              }}
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              autoFocus
+            />
+          </label>
+          {loginError && <p className="mt-2 text-sm font-medium text-red-600">{loginError}</p>}
+          <button
+            type="submit"
+            className="mt-5 w-full rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800 active:scale-[0.98]"
+          >
+            Войти
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-dvh bg-slate-100 px-4 py-6 lg:px-6">
+      <div className="mx-auto w-full max-w-[1400px]">
+        <header className="mb-5 flex flex-col gap-4 rounded-3xl bg-brand-900 p-5 text-white shadow-xl shadow-slate-200/70 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
+              URALSK VEG OPI
+            </p>
+            <h1 className="mt-1 text-2xl font-bold">Админка заказов</h1>
+            <p className="mt-1 text-sm text-brand-100">
+              Заказов: {filteredOrders.length} · Сумма: {formatCurrency(totalAmount)}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
+              className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
+            >
+              {ADMIN_STATUS_OPTIONS.map((status) => (
+                <option key={status.id} value={status.id}>
+                  {status.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={loadAdminOrders}
+              disabled={ordersLoading}
+              className="flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
+            >
+              <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
+              Обновить
+            </button>
+          </div>
+        </header>
+
+        {ordersError && (
+          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {ordersError}
+          </div>
+        )}
+
+        {ordersLoading ? (
+          <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+            Загружаем заказы...
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+            Заказов по выбранному фильтру нет.
+          </div>
+        ) : (
+          <main className="grid gap-4 xl:grid-cols-2">
+            {filteredOrders.map((order) => (
+              <article
+                key={order.id}
+                className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
+              >
+                <div className="border-b border-slate-100 p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        {formatAdminDate(order.created_at)}
+                      </p>
+                      <h2 className="mt-1 text-xl font-bold text-slate-900">
+                        {order.customer_name || 'Без имени'}
+                      </h2>
+                      <p className="mt-1 text-sm font-medium text-slate-600">
+                        {formatPhoneForDisplay(normalizePhone(order.customer_phone))}
+                      </p>
+                    </div>
+                    <select
+                      value={order.status}
+                      onChange={(event) =>
+                        void updateOrderStatus(order.id, event.target.value as AdminOrderStatus)
+                      }
+                      disabled={updatingOrderId === order.id}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      {ADMIN_STATUS_OPTIONS.filter((status) => status.id !== 'all').map((status) => (
+                        <option key={status.id} value={status.id}>
+                          {status.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Тип клиента
+                      </dt>
+                      <dd className="font-semibold text-slate-800">{order.client_type || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Тип заказа
+                      </dt>
+                      <dd className="font-semibold text-slate-800">{order.order_type || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Получение
+                      </dt>
+                      <dd className="font-semibold text-slate-800">
+                        {order.receiving_type || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Статус
+                      </dt>
+                      <dd className="font-semibold text-slate-800">
+                        {ADMIN_STATUS_LABELS[order.status]}
+                      </dd>
+                    </div>
+                    {order.delivery_address && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Адрес доставки
+                        </dt>
+                        <dd className="font-semibold text-slate-800">
+                          {order.delivery_address}
+                        </dd>
+                      </div>
+                    )}
+                    {order.comment && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Комментарий
+                        </dt>
+                        <dd className="font-semibold text-slate-800">{order.comment}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+
+                <div className="p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Общий вес
+                      </p>
+                      <p className="font-bold text-slate-900">
+                        {formatVolumeLabel({} as Product, order.total_weight_kg)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Общая сумма
+                      </p>
+                      <p className="font-bold text-brand-800">
+                        {formatCurrency(order.total_amount)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <h3 className="mb-3 text-sm font-bold text-slate-800">Товары заказа</h3>
+                  {order.items.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+                      Позиции заказа не найдены.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {order.items.map((item) => (
+                        <li
+                          key={item.id}
+                          className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-900">{item.product_name}</p>
+                              <p className="mt-1 text-sm text-slate-600">
+                                {formatVolumeLabel({} as Product, item.quantity_kg)} ·{' '}
+                                {formatCurrency(item.price_per_kg)}/кг
+                              </p>
+                            </div>
+                            <p className="shrink-0 font-bold text-brand-800">
+                              {formatCurrency(item.total_amount)}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </article>
+            ))}
+          </main>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
+  if (window.location.pathname === '/admin') {
+    return <AdminPage />
+  }
+
   const today = useMemo(() => formatDateRu(new Date()), [])
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
