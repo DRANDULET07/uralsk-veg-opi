@@ -109,7 +109,9 @@ interface AdminOrder {
 
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
-const ADMIN_PASSWORD = 'admin123'
+const ADMIN_AUTH_STORAGE_KEY = 'adminAuthenticated'
+const LEGACY_ADMIN_AUTH_STORAGE_KEY = 'uralsk_admin_auth'
+const ADMIN_PASSWORD = 'VegAdmin_2026!'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 1
 const WHOLESALE_MIN_ORDER_KG = 25
@@ -837,7 +839,7 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
 function AdminPage() {
   const [password, setPassword] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(
-    () => sessionStorage.getItem('uralsk_admin_auth') === 'true',
+    () => sessionStorage.getItem(ADMIN_AUTH_STORAGE_KEY) === 'true',
   )
   const [loginError, setLoginError] = useState<string | null>(null)
   const [orders, setOrders] = useState<AdminOrder[]>([])
@@ -954,9 +956,21 @@ function AdminPage() {
       return
     }
 
-    sessionStorage.setItem('uralsk_admin_auth', 'true')
+    sessionStorage.setItem(ADMIN_AUTH_STORAGE_KEY, 'true')
+    sessionStorage.removeItem(LEGACY_ADMIN_AUTH_STORAGE_KEY)
     setIsAuthenticated(true)
     setLoginError(null)
+  }
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(ADMIN_AUTH_STORAGE_KEY)
+    sessionStorage.removeItem(LEGACY_ADMIN_AUTH_STORAGE_KEY)
+    setIsAuthenticated(false)
+    setPassword('')
+    setOrders([])
+    setOrdersError(null)
+    setAdminSearchQuery('')
+    setStatusFilter('all')
   }
 
   const updateOrderStatus = async (orderId: string, status: AdminOrderStatus) => {
@@ -1042,7 +1056,7 @@ function AdminPage() {
                 Новые сверху · данные из Supabase
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[30rem]">
+            <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[34rem]">
               <label className="relative block sm:col-span-2">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60"
@@ -1063,10 +1077,17 @@ function AdminPage() {
               >
                 {ADMIN_STATUS_OPTIONS.map((status) => (
                   <option key={status.id} value={status.id}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
+                  {status.label}
+                </option>
+              ))}
+            </select>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+              >
+                Выйти
+              </button>
               <button
                 type="button"
                 onClick={loadAdminOrders}
