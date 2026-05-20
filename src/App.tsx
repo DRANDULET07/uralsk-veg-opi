@@ -1,10 +1,12 @@
 ﻿import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpDown,
+  Archive,
   CalendarCheck,
   CheckCircle2,
   Leaf,
   Lock,
+  LogOut,
   MapPin,
   Minus,
   Package,
@@ -34,6 +36,14 @@ type OrderType = 'retail' | 'wholesale'
 type FulfillmentType = 'pickup' | 'delivery'
 type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
 type AdminStatusFilter = AdminOrderStatus | 'all'
+type AdminPeriodPreset =
+  | 'today'
+  | 'last7'
+  | 'last30'
+  | 'current-month'
+  | 'previous-month'
+  | 'custom'
+  | 'all'
 type Cart = Record<string, number>
 
 interface CartLine {
@@ -103,6 +113,7 @@ interface AdminOrder {
   total_weight_kg: number
   total_amount: number
   status: AdminOrderStatus
+  archived_at?: string | null
   created_at: string
   items: AdminOrderItem[]
 }
@@ -146,6 +157,16 @@ const ADMIN_STATUS_OPTIONS: { id: AdminStatusFilter; label: string }[] = [
   { id: 'processing', label: ADMIN_STATUS_LABELS.processing },
   { id: 'completed', label: ADMIN_STATUS_LABELS.completed },
   { id: 'cancelled', label: ADMIN_STATUS_LABELS.cancelled },
+]
+
+const ADMIN_PERIOD_OPTIONS: { id: AdminPeriodPreset; label: string }[] = [
+  { id: 'today', label: 'Сегодня' },
+  { id: 'last7', label: '7 дней' },
+  { id: 'last30', label: '30 дней' },
+  { id: 'current-month', label: 'Этот месяц' },
+  { id: 'previous-month', label: 'Прошлый месяц' },
+  { id: 'custom', label: 'Выбрать даты' },
+  { id: 'all', label: 'Все время' },
 ]
 
 const RETAIL_QUICK_QUANTITIES = [1, 3, 5, 10, 25]
@@ -800,6 +821,77 @@ function formatAdminDate(value: string): string {
   })
 }
 
+function getDateInputStart(value: string): number | null {
+  if (!value) return null
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? null : date.getTime()
+}
+
+function getDateInputEnd(value: string): number | null {
+  if (!value) return null
+  const date = new Date(`${value}T23:59:59.999`)
+  return Number.isNaN(date.getTime()) ? null : date.getTime()
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function endOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
+}
+
+function getAdminPeriodRange(
+  preset: AdminPeriodPreset,
+  dateFrom: string,
+  dateTo: string,
+): { fromTime: number | null; toTime: number | null } {
+  const today = new Date()
+
+  if (preset === 'all') {
+    return { fromTime: null, toTime: null }
+  }
+
+  if (preset === 'custom') {
+    return {
+      fromTime: getDateInputStart(dateFrom),
+      toTime: getDateInputEnd(dateTo),
+    }
+  }
+
+  if (preset === 'today') {
+    return {
+      fromTime: startOfDay(today).getTime(),
+      toTime: endOfDay(today).getTime(),
+    }
+  }
+
+  if (preset === 'last7' || preset === 'last30') {
+    const days = preset === 'last7' ? 6 : 29
+    const from = startOfDay(today)
+    from.setDate(from.getDate() - days)
+    return {
+      fromTime: from.getTime(),
+      toTime: endOfDay(today).getTime(),
+    }
+  }
+
+  if (preset === 'current-month') {
+    return {
+      fromTime: new Date(today.getFullYear(), today.getMonth(), 1).getTime(),
+      toTime: endOfDay(today).getTime(),
+    }
+  }
+
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+  const previousMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999)
+
+  return {
+    fromTime: previousMonthStart.getTime(),
+    toTime: previousMonthEnd.getTime(),
+  }
+}
+
 function getAdminStatusClass(status: AdminOrderStatus): string {
   const classes: Record<AdminOrderStatus, string> = {
     new: 'border-sky-200 bg-sky-50 text-sky-800',
@@ -846,8 +938,13 @@ function AdminPage() {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('all')
+  const [periodPreset, setPeriodPreset] = useState<AdminPeriodPreset>('all')
+  const [periodFrom, setPeriodFrom] = useState('')
+  const [periodTo, setPeriodTo] = useState('')
+  const [showArchivedOrders, setShowArchivedOrders] = useState(false)
   const [adminSearchQuery, setAdminSearchQuery] = useState('')
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+  const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null)
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
 
   const loadAdminOrders = async () => {
@@ -855,10 +952,14 @@ function AdminPage() {
     setOrdersError(null)
 
     try {
-      const { data: ordersData, error: ordersErrorResult } = await supabase
+      const ordersQuery = supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
+
+      const { data: ordersData, error: ordersErrorResult } = await (showArchivedOrders
+        ? ordersQuery.not('archived_at', 'is', null)
+        : ordersQuery.is('archived_at', null))
 
       if (ordersErrorResult) throw ordersErrorResult
 
@@ -901,6 +1002,7 @@ function AdminPage() {
           total_weight_kg: toNumber(order.total_weight_kg),
           total_amount: toNumber(order.total_amount),
           status: normalizeAdminStatus(order.status),
+          archived_at: typeof order.archived_at === 'string' ? order.archived_at : null,
           created_at: String(order.created_at ?? ''),
           items: itemsByOrder.get(String(order.id)) ?? [],
         })),
@@ -916,12 +1018,17 @@ function AdminPage() {
     if (isAuthenticated) {
       void loadAdminOrders()
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, showArchivedOrders])
 
   const filteredOrders = useMemo(() => {
     const query = adminSearchQuery.trim().toLowerCase()
 
     return orders.filter((order) => {
+      const matchesArchiveMode = showArchivedOrders
+        ? Boolean(order.archived_at)
+        : !order.archived_at
+      if (!matchesArchiveMode) return false
+
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter
       if (!matchesStatus) return false
       if (!query) return true
@@ -939,14 +1046,37 @@ function AdminPage() {
 
       return haystack.includes(query)
     })
-  }, [adminSearchQuery, orders, statusFilter])
-  const totalAmount = filteredOrders.reduce((sum, order) => sum + order.total_amount, 0)
-  const statusStats = filteredOrders.reduce(
+  }, [adminSearchQuery, orders, showArchivedOrders, statusFilter])
+  const statsOrders = useMemo(() => {
+    const { fromTime, toTime } = getAdminPeriodRange(periodPreset, periodFrom, periodTo)
+
+    return filteredOrders.filter((order) => {
+      const orderTime = new Date(order.created_at).getTime()
+      if (Number.isNaN(orderTime)) return false
+      if (fromTime !== null && orderTime < fromTime) return false
+      if (toTime !== null && orderTime > toTime) return false
+      return true
+    })
+  }, [filteredOrders, periodFrom, periodPreset, periodTo])
+  const statusStats = statsOrders.reduce(
     (acc, order) => {
       acc[order.status] += 1
+      if (order.status === 'completed') acc.revenue += order.total_amount
+      if (order.status === 'new' || order.status === 'processing') {
+        acc.expected += order.total_amount
+      }
+      if (order.status === 'cancelled') acc.cancelledAmount += order.total_amount
       return acc
     },
-    { new: 0, processing: 0, completed: 0, cancelled: 0 } as Record<AdminOrderStatus, number>,
+    {
+      new: 0,
+      processing: 0,
+      completed: 0,
+      cancelled: 0,
+      revenue: 0,
+      expected: 0,
+      cancelledAmount: 0,
+    },
   )
 
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
@@ -971,6 +1101,10 @@ function AdminPage() {
     setOrdersError(null)
     setAdminSearchQuery('')
     setStatusFilter('all')
+    setPeriodPreset('all')
+    setPeriodFrom('')
+    setPeriodTo('')
+    setShowArchivedOrders(false)
   }
 
   const updateOrderStatus = async (orderId: string, status: AdminOrderStatus) => {
@@ -988,6 +1122,115 @@ function AdminPage() {
       setOrdersError(getErrorMessage(error))
     } finally {
       setUpdatingOrderId(null)
+    }
+  }
+
+  const archiveOrder = async (orderId: string) => {
+    setArchivingOrderId(orderId)
+    setOrdersError(null)
+
+    try {
+      const archivedAt = new Date().toISOString()
+      console.log('Archiving order id:', orderId)
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ archived_at: archivedAt })
+        .eq('id', orderId)
+
+      if (updateError) {
+        console.error('Archive order update error:', updateError)
+        setOrdersError(`Не удалось отправить заказ в архив: ${updateError.message}`)
+        return
+      }
+
+      const { data: updatedOrder, error: readError } = await supabase
+        .from('orders')
+        .select('id, archived_at')
+        .eq('id', orderId)
+        .maybeSingle()
+
+      if (readError) {
+        console.error('Archive order read error:', readError)
+        setOrdersError(`Заказ обновлён, но не удалось проверить архив: ${readError.message}`)
+        await loadAdminOrders()
+        return
+      }
+
+      if (!updatedOrder?.archived_at) {
+        console.error('Archive order verification failed:', {
+          orderId,
+          updatedOrder,
+        })
+        setOrdersError('Supabase не подтвердил archived_at. Проверь, изменилось ли значение в таблице orders.')
+        await loadAdminOrders()
+        return
+      }
+
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId ? { ...order, archived_at: updatedOrder.archived_at } : order,
+        ),
+      )
+    } catch (error) {
+      console.error('Archive order unexpected error:', error)
+      setOrdersError(`Не удалось отправить заказ в архив: ${getErrorMessage(error)}`)
+    } finally {
+      setArchivingOrderId(null)
+    }
+  }
+
+  const restoreOrder = async (orderId: string) => {
+    setArchivingOrderId(orderId)
+    setOrdersError(null)
+
+    try {
+      console.log('Restoring order id:', orderId)
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ archived_at: null })
+        .eq('id', orderId)
+
+      if (updateError) {
+        console.error('Restore order update error:', updateError)
+        setOrdersError(`Не удалось восстановить заказ: ${updateError.message}`)
+        return
+      }
+
+      const { data: updatedOrder, error: readError } = await supabase
+        .from('orders')
+        .select('id, archived_at')
+        .eq('id', orderId)
+        .maybeSingle()
+
+      if (readError) {
+        console.error('Restore order read error:', readError)
+        setOrdersError(`Заказ обновлён, но не удалось проверить восстановление: ${readError.message}`)
+        await loadAdminOrders()
+        return
+      }
+
+      if (!updatedOrder) {
+        console.error('Restore order verification failed:', {
+          orderId,
+          updatedOrder,
+        })
+        setOrdersError('Supabase не вернул заказ после восстановления. Проверь id заказа или RLS policy.')
+        await loadAdminOrders()
+        return
+      }
+
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId ? { ...order, archived_at: null } : order,
+        ),
+      )
+    } catch (error) {
+      console.error('Restore order unexpected error:', error)
+      setOrdersError(`Не удалось восстановить заказ: ${getErrorMessage(error)}`)
+    } finally {
+      setArchivingOrderId(null)
     }
   }
 
@@ -1045,7 +1288,7 @@ function AdminPage() {
   return (
     <div className="min-h-dvh bg-slate-100 px-4 py-6 lg:px-6">
       <div className="mx-auto w-full max-w-[1400px]">
-        <header className="mb-5 rounded-3xl bg-brand-900 p-5 text-white shadow-xl shadow-slate-200/70">
+        <header className="mb-5 rounded-3xl bg-brand-900 p-4 text-white shadow-xl shadow-slate-200/70 sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
@@ -1056,8 +1299,19 @@ function AdminPage() {
                 Новые сверху · данные из Supabase
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[34rem]">
-              <label className="relative block sm:col-span-2">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 sm:w-auto"
+            >
+              <LogOut className="h-4 w-4" />
+              Выйти
+            </button>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/10 p-3">
+            <div className="grid gap-2 lg:grid-cols-[minmax(18rem,1.4fr)_12rem_12rem_12rem_10rem]">
+              <label className="relative block">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60"
                   aria-hidden
@@ -1067,46 +1321,92 @@ function AdminPage() {
                   value={adminSearchQuery}
                   onChange={(event) => setAdminSearchQuery(event.target.value)}
                   placeholder="Поиск: имя, телефон, адрес, товар..."
-                  className="w-full rounded-xl border border-white/20 bg-white/10 py-2.5 pl-10 pr-3 text-sm font-semibold text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-white/30"
+                  className="h-11 w-full rounded-xl border border-white/20 bg-white/10 py-2 pl-10 pr-3 text-sm font-semibold text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-white/30"
                 />
               </label>
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
-                className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
+                className="h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
               >
                 {ADMIN_STATUS_OPTIONS.map((status) => (
                   <option key={status.id} value={status.id}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={periodPreset}
+                onChange={(event) => setPeriodPreset(event.target.value as AdminPeriodPreset)}
+                className="h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
               >
-                Выйти
-              </button>
+                {ADMIN_PERIOD_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <label
+                className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
+                  showArchivedOrders
+                    ? 'border-white bg-white text-brand-800'
+                    : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={showArchivedOrders}
+                  onChange={(event) => setShowArchivedOrders(event.target.checked)}
+                  className="h-4 w-4 accent-brand-700"
+                />
+                Показать только архив
+              </label>
               <button
                 type="button"
                 onClick={loadAdminOrders}
                 disabled={ordersLoading}
-                className="flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
               >
                 <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
                 Обновить
               </button>
             </div>
+
+            {periodPreset === 'custom' && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:w-[24.5rem]">
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-brand-100">
+                    С
+                  </span>
+                  <input
+                    type="date"
+                    value={periodFrom}
+                    onChange={(event) => setPeriodFrom(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-white/30 [color-scheme:dark]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-brand-100">
+                    По
+                  </span>
+                  <input
+                    type="date"
+                    value={periodTo}
+                    onChange={(event) => setPeriodTo(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-white/30 [color-scheme:dark]"
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <div className="rounded-2xl bg-white/10 px-4 py-3">
               <p className="text-xs text-brand-100">Всего заказов</p>
-              <p className="text-xl font-bold">{filteredOrders.length}</p>
+              <p className="text-xl font-bold">{statsOrders.length}</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
-              <p className="text-xs text-brand-100">Новых</p>
+              <p className="text-xs text-brand-100">Новые</p>
               <p className="text-xl font-bold">{statusStats.new}</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
@@ -1114,12 +1414,20 @@ function AdminPage() {
               <p className="text-xl font-bold">{statusStats.processing}</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
-              <p className="text-xs text-brand-100">Выполненных</p>
+              <p className="text-xs text-brand-100">Выполненные</p>
               <p className="text-xl font-bold">{statusStats.completed}</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
-              <p className="text-xs text-brand-100">Сумма</p>
-              <p className="text-xl font-bold">{formatCurrency(totalAmount)}</p>
+              <p className="text-xs text-brand-100">Выручка</p>
+              <p className="text-lg font-bold">{formatCurrency(statusStats.revenue)}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Ожидаемая сумма</p>
+              <p className="text-lg font-bold">{formatCurrency(statusStats.expected)}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Отменено</p>
+              <p className="text-lg font-bold">{formatCurrency(statusStats.cancelledAmount)}</p>
             </div>
           </div>
         </header>
@@ -1145,7 +1453,7 @@ function AdminPage() {
                 key={order.id}
                 className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
               >
-                <div className="border-b border-slate-100 p-4">
+                <div className="border-b border-slate-100 p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -1171,6 +1479,12 @@ function AdminPage() {
                       >
                         {ADMIN_STATUS_LABELS[order.status]}
                       </span>
+                      {order.archived_at && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                          <Archive className="h-3.5 w-3.5" />
+                          Архив
+                        </span>
+                      )}
                       <select
                         value={order.status}
                         onChange={(event) =>
@@ -1188,7 +1502,7 @@ function AdminPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <a
                       href={`https://wa.me/${normalizePhone(order.customer_phone)}`}
                       target="_blank"
@@ -1204,6 +1518,29 @@ function AdminPage() {
                     >
                       {copiedOrderId === order.id ? 'Скопировано' : 'Скопировать заказ'}
                     </button>
+                    {order.archived_at ? (
+                      <button
+                        type="button"
+                        onClick={() => void restoreOrder(order.id)}
+                        disabled={archivingOrderId === order.id}
+                        className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Восстановить
+                      </button>
+                    ) : (
+                      (order.status === 'completed' || order.status === 'cancelled') && (
+                        <button
+                          type="button"
+                          onClick={() => void archiveOrder(order.id)}
+                          disabled={archivingOrderId === order.id}
+                          className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-100 disabled:cursor-wait disabled:opacity-70"
+                        >
+                          <Archive className="h-4 w-4" />
+                          В архив
+                        </button>
+                      )
+                    )}
                   </div>
 
                   <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">

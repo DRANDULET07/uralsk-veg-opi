@@ -33,6 +33,9 @@ CREATE POLICY "Allow public read access to products"
   FOR SELECT
   USING (true);
 
+ALTER TABLE IF EXISTS public.orders
+  ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+
 INSERT INTO public.products (
   name,
   category,
