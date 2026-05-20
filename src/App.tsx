@@ -2939,6 +2939,10 @@ export default function App() {
   const [isB2B, setIsB2B] = useState(true)
   const [profileOpen, setProfileOpen] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
+  const cartSheetRef = useRef<HTMLDivElement | null>(null)
+  const dragStartYRef = useRef<number | null>(null)
+  const [cartDragOffset, setCartDragOffset] = useState(0)
+  const [isCartDragging, setIsCartDragging] = useState(false)
   const [cartError, setCartError] = useState<string | null>(null)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
@@ -2958,6 +2962,79 @@ export default function App() {
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(fallbackProducts.map((p) => [p.id, p.defaultVolume])),
   )
+
+  const handleCartTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    dragStartYRef.current = event.touches[0].clientY
+    setIsCartDragging(true)
+  }
+
+  const handleCartTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (dragStartYRef.current === null) return
+
+    const deltaY = event.touches[0].clientY - dragStartYRef.current
+
+    if (deltaY <= 0) {
+      setCartDragOffset(0)
+      return
+    }
+
+    setCartDragOffset(Math.min(deltaY, 240))
+  }
+
+  const resetCartDrag = () => {
+    dragStartYRef.current = null
+    setCartDragOffset(0)
+    setIsCartDragging(false)
+  }
+
+  const handleCartTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (dragStartYRef.current === null) return
+
+    const endY = event.changedTouches[0].clientY
+    const deltaY = endY - dragStartYRef.current
+    const shouldClose = deltaY > 100
+
+    resetCartDrag()
+    if (shouldClose) {
+      setCartOpen(false)
+    }
+  }
+
+  const handleCartTouchCancel = () => resetCartDrag()
+
+  useEffect(() => {
+    if (!cartOpen) return
+
+    const originalOverflow = document.body.style.overflow
+    const originalTouchAction = document.body.style.touchAction
+    const element = cartSheetRef.current
+
+    const handleNativeTouchMove = (event: TouchEvent) => {
+      if (dragStartYRef.current === null) return
+      const deltaY = event.touches[0]?.clientY - dragStartYRef.current
+      if (deltaY > 0) {
+        event.preventDefault()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+
+    if (element) {
+      element.addEventListener('touchmove', handleNativeTouchMove, {
+        passive: false,
+      })
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+      document.body.style.touchAction = originalTouchAction
+
+      if (element) {
+        element.removeEventListener('touchmove', handleNativeTouchMove)
+      }
+    }
+  }, [cartOpen])
 
   const loadProducts = async () => {
     setProductsLoading(true)
@@ -3934,18 +4011,35 @@ export default function App() {
 
       {cartOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px] overscroll-contain touch-none"
           role="dialog"
           aria-modal="true"
           aria-labelledby="cart-modal-title"
           onClick={() => setCartOpen(false)}
         >
           <div
+            ref={cartSheetRef}
             className="flex max-h-[min(92dvh,720px)] w-full max-w-md animate-[slideUp_0.3s_ease-out] flex-col rounded-t-3xl bg-white shadow-2xl"
+            style={
+              cartDragOffset > 0 || isCartDragging
+                ? {
+                    transform: `translateY(${cartDragOffset}px)`,
+                    transition: isCartDragging ? 'none' : 'transform 180ms ease-out',
+                    touchAction: 'pan-y',
+                  }
+                : { touchAction: 'pan-y' }
+            }
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-200" aria-hidden />
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 pb-4 pt-3">
+            <div
+              className="flex flex-col"
+              onTouchStart={handleCartTouchStart}
+              onTouchMove={handleCartTouchMove}
+              onTouchEnd={handleCartTouchEnd}
+              onTouchCancel={handleCartTouchCancel}
+            >
+              <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-200 cursor-grab active:cursor-grabbing" aria-hidden />
+              <div className="flex items-start justify-between border-b border-slate-100 px-5 pb-4 pt-3">
               <div>
                 <h3 id="cart-modal-title" className="text-lg font-bold text-brand-900">
                   {isB2B ? 'Ваш оптовый заказ' : 'Ваш розничный заказ'}
@@ -3972,6 +4066,7 @@ export default function App() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
+            </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
