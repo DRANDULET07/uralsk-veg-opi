@@ -17,6 +17,7 @@ import {
   User,
   X,
 } from 'lucide-react'
+import { supabase } from './lib/supabase'
 import { getErrorMessage, getProducts } from './services/products'
 import type { Product } from './types/product'
 
@@ -324,6 +325,16 @@ function getStockDisplay(product: Product) {
     label: `Доступно: ${formatStockAmount(stock)}`,
     className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   }
+}
+
+function getProductOrderItemId(product: Product): number {
+  const productId = Number(product.id)
+
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new Error(`У товара «${product.name}» некорректный ID для сохранения заказа.`)
+  }
+
+  return productId
 }
 
 function getProductDisplayConfig(product: Product, isB2B: boolean) {
@@ -681,6 +692,8 @@ export default function App() {
     createCheckoutForm(true),
   )
   const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({})
+  const [checkoutSubmitError, setCheckoutSubmitError] = useState<string | null>(null)
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false)
   const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
   const [showMyOrders, setShowMyOrders] = useState(false)
@@ -854,6 +867,7 @@ export default function App() {
     setCart({})
     setCheckoutOpen(false)
     setCheckoutErrors({})
+    setCheckoutSubmitError(null)
   }
 
   const saveOrderToStorage = (order: SavedOrder) => {
@@ -879,6 +893,7 @@ export default function App() {
       if (field === 'fulfillment') delete next.address
       return next
     })
+    setCheckoutSubmitError(null)
   }
 
   const validateCheckoutForm = () => {
@@ -905,6 +920,7 @@ export default function App() {
 
     setCartError(null)
     setCheckoutErrors({})
+    setCheckoutSubmitError(null)
     setCheckoutForm((prev) => ({
       ...prev,
       orderType: isB2B ? 'wholesale' : 'retail',
@@ -912,7 +928,77 @@ export default function App() {
     setCheckoutOpen(true)
   }
 
-  const handleSubmitCheckout = () => {
+  const saveCheckoutOrderToSupabase = async () => {
+    const customerName = checkoutForm.name.trim()
+    const customerPhone = checkoutForm.phone.trim()
+    const clientType = CUSTOMER_TYPE_LABELS[checkoutForm.customerType as CustomerType]
+    const orderType = ORDER_TYPE_LABELS[checkoutForm.orderType as OrderType]
+    const receivingType = FULFILLMENT_LABELS[checkoutForm.fulfillment as FulfillmentType]
+    const deliveryAddress =
+      checkoutForm.fulfillment === 'delivery' ? checkoutForm.address.trim() : null
+    const comment = checkoutForm.comment.trim() || null
+    const totalWeightKg = cartLines.reduce((sum, line) => sum + line.volume, 0)
+    const updatedAt = new Date().toISOString()
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .upsert(
+        {
+          name: customerName,
+          phone: customerPhone,
+          client_type: clientType,
+          updated_at: updatedAt,
+        },
+        { onConflict: 'phone' },
+      )
+      .select('id')
+      .single()
+
+    if (clientError) throw new Error(`Не удалось сохранить клиента: ${clientError.message}`)
+    if (!client?.id) throw new Error('Supabase не вернул ID клиента.')
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        client_id: client.id,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        client_type: clientType,
+        order_type: orderType,
+        receiving_type: receivingType,
+        delivery_address: deliveryAddress,
+        comment,
+        total_weight_kg: totalWeightKg,
+        total_amount: cartGrandTotal,
+        status: 'new',
+      })
+      .select('id')
+      .single()
+
+    if (orderError) throw new Error(`Не удалось сохранить заказ: ${orderError.message}`)
+    if (!order?.id) throw new Error('Supabase не вернул ID заказа.')
+
+    const orderItems = cartLines.map((line) => {
+      const { pricePerKg } = calcPricing(line.product, line.volume, isB2B)
+
+      return {
+        order_id: order.id,
+        product_id: getProductOrderItemId(line.product),
+        product_name: line.product.name,
+        quantity_kg: line.volume,
+        price_per_kg: pricePerKg,
+        total_amount: line.total,
+      }
+    })
+
+    const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
+
+    if (itemsError) throw new Error(`Не удалось сохранить товары заказа: ${itemsError.message}`)
+  }
+
+  const handleSubmitCheckout = async () => {
+    if (isSubmittingOrder) return
+
     if (cartLines.length === 0) {
       setCheckoutOpen(false)
       setCartError('Корзина пуста. Добавьте товары перед оформлением заказа.')
@@ -922,24 +1008,34 @@ export default function App() {
     if (!validateCheckoutForm()) return
 
     setCartError(null)
-    const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B, checkoutForm)
+    setCheckoutSubmitError(null)
+    setIsSubmittingOrder(true)
 
-    const order: SavedOrder = {
-      userName: checkoutForm.name.trim() || undefined,
-      createdAt: new Date().toISOString(),
-      items: cartLines.map((line) => ({
-        productId: line.product.id,
-        productName: line.product.name,
-        volume: line.volume,
-        volumeLabel: line.volumeLabel,
-        total: line.total,
-      })),
-      total: cartGrandTotal,
-      status: 'Отправлено в WhatsApp',
+    try {
+      await saveCheckoutOrderToSupabase()
+
+      const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B, checkoutForm)
+      const order: SavedOrder = {
+        userName: checkoutForm.name.trim() || undefined,
+        createdAt: new Date().toISOString(),
+        items: cartLines.map((line) => ({
+          productId: line.product.id,
+          productName: line.product.name,
+          volume: line.volume,
+          volumeLabel: line.volumeLabel,
+          total: line.total,
+        })),
+        total: cartGrandTotal,
+        status: 'Отправлено в WhatsApp',
+      }
+
+      saveOrderToStorage(order)
+      window.location.href = whatsappUrl
+    } catch (error) {
+      setCheckoutSubmitError(getErrorMessage(error))
+    } finally {
+      setIsSubmittingOrder(false)
     }
-
-    saveOrderToStorage(order)
-    window.location.href = whatsappUrl
   }
 
   const handleRepeatLastOrder = () => {
@@ -1661,7 +1757,9 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="checkout-modal-title"
-          onClick={() => setCheckoutOpen(false)}
+          onClick={() => {
+            if (!isSubmittingOrder) setCheckoutOpen(false)
+          }}
         >
           <form
             className="max-h-[min(92dvh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl"
@@ -1683,7 +1781,8 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setCheckoutOpen(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                disabled={isSubmittingOrder}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                 aria-label="Закрыть форму оформления"
               >
                 <X className="h-5 w-5" />
@@ -1812,6 +1911,11 @@ export default function App() {
             </div>
 
             <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+              {checkoutSubmitError && (
+                <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                  {checkoutSubmitError}
+                </div>
+              )}
               <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
                 <span className="text-sm font-semibold text-slate-700">К оплате</span>
                 <span className="text-lg font-bold tabular-nums text-brand-800">
@@ -1820,9 +1924,10 @@ export default function App() {
               </div>
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
+                disabled={isSubmittingOrder}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d] disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
               >
-                Отправить в WhatsApp
+                {isSubmittingOrder ? 'Сохраняем заказ...' : 'Отправить в WhatsApp'}
               </button>
             </div>
           </form>
