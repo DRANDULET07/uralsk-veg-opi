@@ -37,6 +37,7 @@ type FulfillmentType = 'pickup' | 'delivery'
 type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
 type AdminStatusFilter = AdminOrderStatus | 'all'
 type AdminTab = 'orders' | 'products'
+type AdminReportStatusMode = AdminStatusFilter | 'active'
 type AdminPeriodPreset =
   | 'today'
   | 'last7'
@@ -192,6 +193,17 @@ const ADMIN_PERIOD_OPTIONS: { id: AdminPeriodPreset; label: string }[] = [
   { id: 'previous-month', label: 'Прошлый месяц' },
   { id: 'custom', label: 'Выбрать даты' },
   { id: 'all', label: 'Все время' },
+]
+
+const REPORT_CLIENT_TYPE_OPTIONS = ['all', 'Розница', 'Оптовик', 'Кафе', 'Магазин'] as const
+const REPORT_RECEIVING_TYPE_OPTIONS = ['all', 'Доставка', 'Самовывоз'] as const
+const REPORT_STATUS_OPTIONS: { id: AdminReportStatusMode; label: string }[] = [
+  { id: 'all', label: 'Все статусы' },
+  { id: 'new', label: 'Только новые' },
+  { id: 'processing', label: 'В работе' },
+  { id: 'completed', label: 'Выполненные' },
+  { id: 'cancelled', label: 'Отменённые' },
+  { id: 'active', label: 'Новые + В работе' },
 ]
 
 const ADMIN_TABS: { id: AdminTab; label: string }[] = [
@@ -398,6 +410,10 @@ function formatMoney(value: number): string {
 
 function formatCurrency(value: number): string {
   return `${formatMoney(value)} тг`
+}
+
+function formatKg(value: number): string {
+  return `${Number(value || 0).toLocaleString('ru-RU')} кг`
 }
 
 function getMidpoint(min: number, max: number): number {
@@ -944,6 +960,21 @@ function getAdminPeriodRange(
     fromTime: previousMonthStart.getTime(),
     toTime: previousMonthEnd.getTime(),
   }
+}
+
+function getAdminPeriodLabel(preset: AdminPeriodPreset, dateFrom: string, dateTo: string): string {
+  if (preset === 'custom') {
+    if (dateFrom && dateTo) return `${dateFrom} - ${dateTo}`
+    if (dateFrom) return `с ${dateFrom}`
+    if (dateTo) return `по ${dateTo}`
+    return 'Выбрать даты'
+  }
+
+  return ADMIN_PERIOD_OPTIONS.find((option) => option.id === preset)?.label ?? 'Все время'
+}
+
+function getReportStatusLabel(statusMode: AdminReportStatusMode): string {
+  return REPORT_STATUS_OPTIONS.find((option) => option.id === statusMode)?.label ?? 'Все статусы'
 }
 
 function getAdminStatusClass(status: AdminOrderStatus): string {
@@ -1666,11 +1697,19 @@ function AdminPage() {
   const [periodPreset, setPeriodPreset] = useState<AdminPeriodPreset>('all')
   const [periodFrom, setPeriodFrom] = useState('')
   const [periodTo, setPeriodTo] = useState('')
+  const [reportPeriod, setReportPeriod] = useState<AdminPeriodPreset>('all')
+  const [reportDateFrom, setReportDateFrom] = useState('')
+  const [reportDateTo, setReportDateTo] = useState('')
+  const [reportClientType, setReportClientType] = useState('all')
+  const [reportReceivingType, setReportReceivingType] = useState('all')
+  const [reportStatusMode, setReportStatusMode] = useState<AdminReportStatusMode>('all')
   const [showArchivedOrders, setShowArchivedOrders] = useState(false)
   const [adminSearchQuery, setAdminSearchQuery] = useState('')
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null)
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
+  const [quickCalcPrice, setQuickCalcPrice] = useState('')
+  const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
 
   const loadAdminOrders = async () => {
     setOrdersLoading(true)
@@ -1803,6 +1842,138 @@ function AdminPage() {
       cancelledAmount: 0,
     },
   )
+  const reportFilteredOrders = useMemo(() => {
+    const { fromTime, toTime } = getAdminPeriodRange(reportPeriod, reportDateFrom, reportDateTo)
+
+    return orders.filter((order) => {
+      const matchesArchiveMode = showArchivedOrders
+        ? Boolean(order.archived_at)
+        : !order.archived_at
+      if (!matchesArchiveMode) return false
+
+      const orderTime = new Date(order.created_at).getTime()
+      if (Number.isNaN(orderTime)) return false
+      if (fromTime !== null && orderTime < fromTime) return false
+      if (toTime !== null && orderTime > toTime) return false
+
+      if (reportClientType !== 'all' && order.client_type !== reportClientType) return false
+      if (reportReceivingType !== 'all' && order.receiving_type !== reportReceivingType) return false
+      if (reportStatusMode === 'active') {
+        return order.status === 'new' || order.status === 'processing'
+      }
+      if (reportStatusMode !== 'all' && order.status !== reportStatusMode) return false
+
+      return true
+    })
+  }, [
+    orders,
+    reportClientType,
+    reportDateFrom,
+    reportDateTo,
+    reportPeriod,
+    reportReceivingType,
+    reportStatusMode,
+    showArchivedOrders,
+  ])
+  const reportSummary = [
+    getAdminPeriodLabel(reportPeriod, reportDateFrom, reportDateTo),
+    reportClientType === 'all' ? 'Все клиенты' : reportClientType,
+    reportReceivingType === 'all' ? 'Все способы' : reportReceivingType,
+    getReportStatusLabel(reportStatusMode),
+    `${reportFilteredOrders.length} заказов`,
+  ].join(' · ')
+  const orderAnalytics = useMemo(() => {
+    const productTotals = new Map<string, { productName: string; totalQuantityKg: number; totalAmount: number }>()
+    const clientTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
+    const receivingTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
+
+    const totals = reportFilteredOrders.reduce(
+      (acc, order) => {
+        acc.totalTurnover += order.total_amount
+        acc.totalWeightKg += order.total_weight_kg
+
+        if (order.status === 'completed') {
+          acc.completedOrdersCount += 1
+          acc.completedRevenue += order.total_amount
+          acc.completedWeightKg += order.total_weight_kg
+        }
+
+        if (order.status === 'new' || order.status === 'processing') {
+          acc.expectedAmount += order.total_amount
+          acc.expectedWeightKg += order.total_weight_kg
+        }
+
+        if (order.status === 'cancelled') {
+          acc.cancelledAmount += order.total_amount
+          acc.cancelledWeightKg += order.total_weight_kg
+        }
+
+        const clientLabel = order.client_type || 'Не указан'
+        const currentClient = clientTypeTotals.get(clientLabel) ?? {
+          label: clientLabel,
+          count: 0,
+          totalAmount: 0,
+        }
+        clientTypeTotals.set(clientLabel, {
+          ...currentClient,
+          count: currentClient.count + 1,
+          totalAmount: currentClient.totalAmount + order.total_amount,
+        })
+
+        const receivingLabel = order.receiving_type || 'Не указано'
+        const currentReceiving = receivingTypeTotals.get(receivingLabel) ?? {
+          label: receivingLabel,
+          count: 0,
+          totalAmount: 0,
+        }
+        receivingTypeTotals.set(receivingLabel, {
+          ...currentReceiving,
+          count: currentReceiving.count + 1,
+          totalAmount: currentReceiving.totalAmount + order.total_amount,
+        })
+
+        order.items.forEach((item) => {
+          const productName = item.product_name || 'Товар'
+          const currentProduct = productTotals.get(productName) ?? {
+            productName,
+            totalQuantityKg: 0,
+            totalAmount: 0,
+          }
+          productTotals.set(productName, {
+            ...currentProduct,
+            totalQuantityKg: currentProduct.totalQuantityKg + item.quantity_kg,
+            totalAmount: currentProduct.totalAmount + item.total_amount,
+          })
+        })
+
+        return acc
+      },
+      {
+        totalTurnover: 0,
+        totalWeightKg: 0,
+        completedOrdersCount: 0,
+        completedRevenue: 0,
+        completedWeightKg: 0,
+        expectedAmount: 0,
+        expectedWeightKg: 0,
+        cancelledAmount: 0,
+        cancelledWeightKg: 0,
+      },
+    )
+
+    return {
+      ...totals,
+      averageCheck: totals.completedOrdersCount > 0
+        ? totals.completedRevenue / totals.completedOrdersCount
+        : 0,
+      topProducts: Array.from(productTotals.values())
+        .sort((a, b) => b.totalAmount - a.totalAmount)
+        .slice(0, 5),
+      clientTypes: Array.from(clientTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
+      receivingTypes: Array.from(receivingTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
+    }
+  }, [reportFilteredOrders])
+  const quickCalcTotal = toNumber(quickCalcPrice) * toNumber(quickCalcQuantity)
 
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1830,7 +2001,15 @@ function AdminPage() {
     setPeriodPreset('all')
     setPeriodFrom('')
     setPeriodTo('')
+    setReportPeriod('all')
+    setReportDateFrom('')
+    setReportDateTo('')
+    setReportClientType('all')
+    setReportReceivingType('all')
+    setReportStatusMode('all')
     setShowArchivedOrders(false)
+    setQuickCalcPrice('')
+    setQuickCalcQuantity('')
   }
 
   const updateOrderStatus = async (orderId: string, status: AdminOrderStatus) => {
@@ -2176,6 +2355,308 @@ function AdminPage() {
             </div>
           </div>
         </header>
+
+        <section className="mb-5 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70 xl:col-span-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Фильтр отчёта</h2>
+                <p className="text-sm text-slate-500">
+                  Эти фильтры управляют финансами, топами и аналитикой ниже
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportPeriod('all')
+                  setReportDateFrom('')
+                  setReportDateTo('')
+                  setReportClientType('all')
+                  setReportReceivingType('all')
+                  setReportStatusMode('all')
+                }}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+              >
+                Сбросить фильтры
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {ADMIN_PERIOD_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setReportPeriod(option.id)}
+                  className={`rounded-full px-3 py-1.5 text-sm font-bold transition ${
+                    reportPeriod === option.id
+                      ? 'bg-brand-700 text-white'
+                      : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-brand-50 hover:text-brand-800'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {reportPeriod === 'custom' && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:w-[24rem]">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Дата С</span>
+                  <input
+                    type="date"
+                    value={reportDateFrom}
+                    onChange={(event) => setReportDateFrom(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Дата ПО</span>
+                  <input
+                    type="date"
+                    value={reportDateTo}
+                    onChange={(event) => setReportDateTo(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
+                <select
+                  value={reportClientType}
+                  onChange={(event) => setReportClientType(event.target.value)}
+                  className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                >
+                  {REPORT_CLIENT_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'all' ? 'Все клиенты' : option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Получение</span>
+                <select
+                  value={reportReceivingType}
+                  onChange={(event) => setReportReceivingType(event.target.value)}
+                  className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                >
+                  {REPORT_RECEIVING_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'all' ? 'Все способы' : option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Режим заказов</span>
+                <select
+                  value={reportStatusMode}
+                  onChange={(event) => setReportStatusMode(event.target.value as AdminReportStatusMode)}
+                  className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                >
+                  {REPORT_STATUS_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70 xl:col-span-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Финансы за выбранный период</h2>
+                <p className="text-sm text-slate-500">
+                  Отчёт: {reportSummary}
+                </p>
+              </div>
+              <p className="text-sm font-bold text-brand-700">
+                {reportFilteredOrders.length} заказов
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="rounded-2xl bg-emerald-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-emerald-700">Выручка</p>
+                <p className="mt-1 text-xl font-bold text-emerald-900">
+                  {formatCurrency(orderAnalytics.completedRevenue)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-amber-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-amber-700">Ожидаемая сумма</p>
+                <p className="mt-1 text-xl font-bold text-amber-900">
+                  {formatCurrency(orderAnalytics.expectedAmount)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-100 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-500">Отменённая сумма</p>
+                <p className="mt-1 text-xl font-bold text-slate-800">
+                  {formatCurrency(orderAnalytics.cancelledAmount)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-brand-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-brand-700">Общий оборот</p>
+                <p className="mt-1 text-xl font-bold text-brand-900">
+                  {formatCurrency(orderAnalytics.totalTurnover)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-sky-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-sky-700">Средний чек</p>
+                <p className="mt-1 text-xl font-bold text-sky-900">
+                  {formatCurrency(orderAnalytics.averageCheck)}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">Всего кг</p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {formatKg(orderAnalytics.totalWeightKg)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">Выполнено кг</p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {formatKg(orderAnalytics.completedWeightKg)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">Ожидается кг</p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {formatKg(orderAnalytics.expectedWeightKg)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">Отменено кг</p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {formatKg(orderAnalytics.cancelledWeightKg)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
+            <h2 className="text-lg font-bold text-slate-900">Топ товаров</h2>
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2">Товар</th>
+                    <th className="px-3 py-2 text-right">Количество</th>
+                    <th className="px-3 py-2 text-right">Сумма</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {orderAnalytics.topProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-5 text-center text-slate-500">
+                        Нет товаров в выбранных заказах.
+                      </td>
+                    </tr>
+                  ) : (
+                    orderAnalytics.topProducts.map((item) => (
+                      <tr key={item.productName}>
+                        <td className="px-3 py-2 font-semibold text-slate-800">{item.productName}</td>
+                        <td className="px-3 py-2 text-right text-slate-600">{formatKg(item.totalQuantityKg)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-brand-800">
+                          {formatCurrency(item.totalAmount)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
+            <h2 className="text-lg font-bold text-slate-900">Типы клиентов</h2>
+            <div className="mt-4 space-y-2">
+              {orderAnalytics.clientTypes.length === 0 ? (
+                <p className="rounded-2xl bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+                  Нет данных по клиентам.
+                </p>
+              ) : (
+                orderAnalytics.clientTypes.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="font-bold text-slate-900">{item.label}</p>
+                      <p className="text-sm text-slate-500">{item.count} заказов</p>
+                    </div>
+                    <p className="text-right font-bold text-brand-800">{formatCurrency(item.totalAmount)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
+            <h2 className="text-lg font-bold text-slate-900">Получение</h2>
+            <div className="mt-4 space-y-2">
+              {orderAnalytics.receivingTypes.length === 0 ? (
+                <p className="rounded-2xl bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+                  Нет данных по получению.
+                </p>
+              ) : (
+                orderAnalytics.receivingTypes.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="font-bold text-slate-900">{item.label}</p>
+                      <p className="text-sm text-slate-500">{item.count} заказов</p>
+                    </div>
+                    <p className="text-right font-bold text-brand-800">{formatCurrency(item.totalAmount)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
+            <h2 className="text-lg font-bold text-slate-900">Быстрый расчёт</h2>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Цена за кг</span>
+                <input
+                  type="number"
+                  value={quickCalcPrice}
+                  onChange={(event) => setQuickCalcPrice(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Количество кг</span>
+                <input
+                  type="number"
+                  value={quickCalcQuantity}
+                  onChange={(event) => setQuickCalcQuantity(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                />
+              </label>
+            </div>
+            <div className="mt-4 rounded-2xl bg-brand-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase text-brand-700">Итог</p>
+              <p className="mt-1 text-2xl font-bold text-brand-900">
+                {formatCurrency(quickCalcTotal)}
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                {toNumber(quickCalcPrice).toLocaleString('ru-RU')} × {toNumber(quickCalcQuantity).toLocaleString('ru-RU')} кг
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setQuickCalcPrice('')
+                setQuickCalcQuantity('')
+              }}
+              className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+            >
+              Очистить
+            </button>
+          </div>
+        </section>
 
         {ordersError && (
           <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
