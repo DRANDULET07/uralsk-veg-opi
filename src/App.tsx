@@ -78,6 +78,8 @@ interface CheckoutForm {
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
+const RETAIL_MIN_ORDER_KG = 1
+const WHOLESALE_MIN_ORDER_KG = 25
 
 const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
   retail: 'Розница',
@@ -327,6 +329,14 @@ function getStockDisplay(product: Product) {
   }
 }
 
+function getMinimumOrderKg(isB2B: boolean): number {
+  return isB2B ? WHOLESALE_MIN_ORDER_KG : RETAIL_MIN_ORDER_KG
+}
+
+function canOrderProduct(product: Product, isB2B: boolean): boolean {
+  return getAvailableStockKg(product) >= getMinimumOrderKg(isB2B)
+}
+
 function getProductOrderItemId(product: Product): number {
   const productId = Number(product.id)
 
@@ -338,18 +348,19 @@ function getProductOrderItemId(product: Product): number {
 }
 
 function getProductDisplayConfig(product: Product, isB2B: boolean) {
-  const minOrder = Math.max(1, product.min_order ?? product.sliderMin ?? 1)
+  const minOrder = getMinimumOrderKg(isB2B)
   const stock = getAvailableStockKg(product)
+  const canOrder = stock >= minOrder
 
   if (isB2B) {
     const sliderMax = stock
 
     return {
       unitMode: 'kg' as const,
-      sliderMin: stock > 0 ? Math.min(minOrder, stock) : minOrder,
+      sliderMin: minOrder,
       sliderMax,
       sliderStep: 1,
-      defaultVolume: stock > 0 ? Math.min(minOrder, stock) : 0,
+      defaultVolume: canOrder ? minOrder : 0,
     }
   }
 
@@ -357,15 +368,16 @@ function getProductDisplayConfig(product: Product, isB2B: boolean) {
 
   return {
     unitMode: 'kg' as const,
-    sliderMin: stock > 0 ? 1 : 0,
+    sliderMin: minOrder,
     sliderMax,
     sliderStep: 1,
-    defaultVolume: stock > 0 ? Math.min(5, sliderMax) : 0,
+    defaultVolume: canOrder ? minOrder : 0,
   }
 }
 
 function snapVolume(value: number, product: Product, isB2B = true): number {
   const { sliderMin, sliderMax, sliderStep } = getProductDisplayConfig(product, isB2B)
+  if (sliderMax < sliderMin) return 0
   const clamped = Math.min(sliderMax, Math.max(sliderMin, value))
   const stepped =
     sliderMin + Math.round((clamped - sliderMin) / sliderStep) * sliderStep
@@ -396,6 +408,34 @@ function formatQuickQuantityLabel(value: number): string {
   }
 
   return `${formatMoney(value)} кг`
+}
+
+function normalizePhone(value: string): string {
+  const digits = value.replace(/\D/g, '')
+
+  if (digits.length === 11 && digits.startsWith('8')) {
+    return `7${digits.slice(1)}`
+  }
+
+  if (digits.length === 11 && digits.startsWith('7')) {
+    return digits
+  }
+
+  if (digits.length === 10) {
+    return `7${digits}`
+  }
+
+  return digits
+}
+
+function isValidNormalizedPhone(phone: string): boolean {
+  return phone.length === 11 && phone.startsWith('7')
+}
+
+function formatPhoneForDisplay(phone: string): string {
+  if (!isValidNormalizedPhone(phone)) return phone
+
+  return `+${phone.slice(0, 1)} ${phone.slice(1, 4)} ${phone.slice(4, 7)} ${phone.slice(7, 9)} ${phone.slice(9, 11)}`
 }
 
 function createCheckoutForm(isB2B: boolean): CheckoutForm {
@@ -448,6 +488,7 @@ function buildCartWhatsAppMessage(
   grandTotal: number,
   isB2B: boolean,
   checkout?: CheckoutForm,
+  normalizedPhone?: string,
 ): string {
   const itemLines = lines.map((line) => {
     const quantity = formatVolumeWhatsApp(line.product, line.volume, isB2B)
@@ -456,10 +497,11 @@ function buildCartWhatsAppMessage(
 
   const totalVolume = lines.reduce((sum, line) => sum + line.volume, 0)
   const volumeLabel = formatQuantityWhatsApp(totalVolume, isB2B)
+  const displayPhone = normalizedPhone ?? (checkout ? normalizePhone(checkout.phone) : '')
   const details = checkout
     ? [
         `Имя: ${checkout.name.trim()}`,
-        `Телефон: ${checkout.phone.trim()}`,
+        `Телефон: ${formatPhoneForDisplay(displayPhone)}`,
         `Тип клиента: ${CUSTOMER_TYPE_LABELS[checkout.customerType as CustomerType]}`,
         `Тип заказа: ${ORDER_TYPE_LABELS[checkout.orderType as OrderType]}`,
         `Получение: ${FULFILLMENT_LABELS[checkout.fulfillment as FulfillmentType]}`,
@@ -485,8 +527,9 @@ function getCartWhatsAppUrl(
   grandTotal: number,
   isB2B: boolean,
   checkout?: CheckoutForm,
+  normalizedPhone?: string,
 ): string {
-  const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B, checkout)
+  const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B, checkout, normalizedPhone)
   return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
 }
 
@@ -554,11 +597,13 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
   const step = isB2B ? 25 : 1
   const minHint = isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'
   const isOutOfStock = stockDisplay.stock <= 0
-  const canDecrease = !isOutOfStock && currentQuantity > minQuantity
-  const canIncrease = !isOutOfStock && currentQuantity < maxQuantity
+  const isBelowMinimum = !isOutOfStock && stockDisplay.stock < minQuantity
+  const quantityDisabled = isOutOfStock || isBelowMinimum
+  const canDecrease = !quantityDisabled && currentQuantity > minQuantity
+  const canIncrease = !quantityDisabled && currentQuantity < maxQuantity
 
   const commitValue = (nextValue: number) => {
-    if (isOutOfStock) return
+    if (quantityDisabled) return
     onChange(snapVolume(nextValue, product, isB2B))
   }
 
@@ -573,9 +618,17 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
           >
             {stockDisplay.label}
           </p>
+          {isBelowMinimum && (
+            <p className="mt-2 text-xs font-bold text-amber-700">
+              Остаток меньше минимального заказа
+            </p>
+          )}
         </div>
-        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 shadow-sm">
-          шаг {step} кг
+        <span
+          className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 shadow-sm"
+          title={`Кнопки плюс и минус меняют количество на ${step} кг`}
+        >
+          +/- {step} кг
         </span>
       </div>
 
@@ -597,7 +650,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
             max={cfg.sliderMax}
             step={cfg.sliderStep}
             value={currentQuantity}
-            disabled={isOutOfStock}
+            disabled={quantityDisabled}
             onChange={(e: ChangeEvent<HTMLInputElement>) => {
               const parsed = Number(e.target.value)
               if (!Number.isNaN(parsed)) {
@@ -769,9 +822,10 @@ export default function App() {
     )
     setCart((prev) =>
       Object.fromEntries(
-        Object.entries(prev).map(([productId, volume]) => {
+        Object.entries(prev).flatMap(([productId, volume]) => {
           const product = products.find((p) => p.id === productId)
-          return [productId, product ? snapVolume(volume, product, isB2B) : volume]
+          const nextVolume = product ? snapVolume(volume, product, isB2B) : volume
+          return nextVolume > 0 ? [[productId, nextVolume]] : []
         }),
       ),
     )
@@ -812,12 +866,23 @@ export default function App() {
 
   const addToCart = (product: Product) => {
     const stock = getAvailableStockKg(product)
+    const minOrder = getMinimumOrderKg(isB2B)
     if (stock <= 0) {
       setCartError('Товара нет в наличии.')
       return
     }
 
+    if (stock < minOrder) {
+      setCartError(`Остаток меньше минимального заказа: минимум ${formatStockAmount(minOrder)}.`)
+      return
+    }
+
     const selected = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
+    if (selected < minOrder) {
+      setCartError(`Минимальный заказ: ${formatStockAmount(minOrder)}.`)
+      return
+    }
+
     setCartError(null)
     setCart((prev) => {
       const current = prev[product.id] ?? 0
@@ -898,9 +963,14 @@ export default function App() {
 
   const validateCheckoutForm = () => {
     const nextErrors: Partial<Record<keyof CheckoutForm, string>> = {}
+    const normalizedPhone = normalizePhone(checkoutForm.phone)
 
     if (!checkoutForm.name.trim()) nextErrors.name = 'Укажите имя'
-    if (!checkoutForm.phone.trim()) nextErrors.phone = 'Укажите номер телефона'
+    if (!checkoutForm.phone.trim()) {
+      nextErrors.phone = 'Укажите номер телефона'
+    } else if (!isValidNormalizedPhone(normalizedPhone)) {
+      nextErrors.phone = 'Введите номер Казахстана в формате +7 777 123 45 67'
+    }
     if (!checkoutForm.customerType) nextErrors.customerType = 'Выберите тип клиента'
     if (!checkoutForm.orderType) nextErrors.orderType = 'Выберите тип заказа'
     if (!checkoutForm.fulfillment) nextErrors.fulfillment = 'Выберите способ получения'
@@ -928,9 +998,12 @@ export default function App() {
     setCheckoutOpen(true)
   }
 
-  const saveCheckoutOrderToSupabase = async () => {
+  const saveCheckoutOrderToSupabase = async (normalizedPhone: string) => {
     const customerName = checkoutForm.name.trim()
-    const customerPhone = checkoutForm.phone.trim()
+    if (!isValidNormalizedPhone(normalizedPhone)) {
+      throw new Error('Введите корректный номер телефона перед сохранением заказа.')
+    }
+
     const clientType = CUSTOMER_TYPE_LABELS[checkoutForm.customerType as CustomerType]
     const orderType = ORDER_TYPE_LABELS[checkoutForm.orderType as OrderType]
     const receivingType = FULFILLMENT_LABELS[checkoutForm.fulfillment as FulfillmentType]
@@ -945,7 +1018,7 @@ export default function App() {
       .upsert(
         {
           name: customerName,
-          phone: customerPhone,
+          phone: normalizedPhone,
           client_type: clientType,
           updated_at: updatedAt,
         },
@@ -962,7 +1035,7 @@ export default function App() {
       .insert({
         client_id: client.id,
         customer_name: customerName,
-        customer_phone: customerPhone,
+        customer_phone: normalizedPhone,
         client_type: clientType,
         order_type: orderType,
         receiving_type: receivingType,
@@ -1007,14 +1080,29 @@ export default function App() {
 
     if (!validateCheckoutForm()) return
 
+    const normalizedPhone = normalizePhone(checkoutForm.phone)
+    if (!isValidNormalizedPhone(normalizedPhone)) {
+      setCheckoutErrors((prev) => ({
+        ...prev,
+        phone: 'Введите номер Казахстана в формате +7 777 123 45 67',
+      }))
+      return
+    }
+
     setCartError(null)
     setCheckoutSubmitError(null)
     setIsSubmittingOrder(true)
 
     try {
-      await saveCheckoutOrderToSupabase()
+      await saveCheckoutOrderToSupabase(normalizedPhone)
 
-      const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B, checkoutForm)
+      const whatsappUrl = getCartWhatsAppUrl(
+        cartLines,
+        cartGrandTotal,
+        isB2B,
+        checkoutForm,
+        normalizedPhone,
+      )
       const order: SavedOrder = {
         userName: checkoutForm.name.trim() || undefined,
         createdAt: new Date().toISOString(),
@@ -1288,7 +1376,7 @@ export default function App() {
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
           const stockDisplay = getStockDisplay(product)
-          const isOutOfStock = stockDisplay.stock <= 0
+          const cannotOrderProduct = !canOrderProduct(product, isB2B)
           const analyticsActionClass = 'bg-white text-emerald-700'
           const productTitle = product.image ? null : (
             <div className="px-5 pt-5">
@@ -1372,12 +1460,10 @@ export default function App() {
                   )}
                 </div>
 
-                {(product.minOrder || !isB2B) && (
-                  <p className="flex items-center gap-1.5 text-sm text-slate-600">
-                    <Scale className="h-4 w-4 text-brand-600" aria-hidden />
-                    {isB2B ? product.minOrder : 'Розничный заказ от 5 кг, точный выбор по 1 кг'}
-                  </p>
-                )}
+                <p className="flex items-center gap-1.5 text-sm text-slate-600">
+                  <Scale className="h-4 w-4 text-brand-600" aria-hidden />
+                  {isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'}
+                </p>
                 {product.bookingNote && (
                   <p className="flex items-center gap-1.5 text-sm font-medium text-brand-700">
                     <Package className="h-4 w-4" aria-hidden />
@@ -1474,9 +1560,9 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => addToCart(product)}
-                  disabled={isOutOfStock}
+                  disabled={cannotOrderProduct}
                   className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
-                    isOutOfStock
+                    cannotOrderProduct
                       ? 'cursor-not-allowed bg-slate-200 text-slate-500 shadow-none hover:shadow-md'
                       : justAdded
                       ? 'bg-emerald-700 text-white shadow-emerald-700/20'
@@ -1487,8 +1573,10 @@ export default function App() {
                 >
                   <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
                   <span className="sm:hidden">
-                    {isOutOfStock
-                      ? 'Нет в наличии'
+                    {cannotOrderProduct
+                      ? stockDisplay.stock <= 0
+                        ? 'Нет в наличии'
+                        : 'Недостаточно остатка'
                       : justAdded
                         ? 'Добавлено!'
                         : inCart
@@ -1496,7 +1584,15 @@ export default function App() {
                           : 'Добавить в корзину'}
                   </span>
                   <span className="hidden sm:inline">
-                    {isOutOfStock ? 'Нет в наличии' : justAdded ? 'Добавлено!' : inCart ? 'Добавить ещё' : 'В корзину'}
+                    {cannotOrderProduct
+                      ? stockDisplay.stock <= 0
+                        ? 'Нет в наличии'
+                        : 'Недостаточно остатка'
+                      : justAdded
+                        ? 'Добавлено!'
+                        : inCart
+                          ? 'Добавить ещё'
+                          : 'В корзину'}
                   </span>
                 </button>
               </div>
