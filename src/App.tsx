@@ -1,4 +1,4 @@
-﻿import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpDown,
   Archive,
@@ -257,7 +257,7 @@ const fallbackProducts: Product[] = [
     sliderStep: 0.5,
     defaultVolume: 5,
     retailStockKg: 42,
-    analyticsTitle: '📊 Аналитика рынка: цена стабильна',
+    analyticsTitle: '?? Аналитика рынка: цена стабильна',
     analyticsText: 'На рынке Уральска стабильный объем местного картофеля. В ближайшие 2 недели ценовых скачков не ожидается, запасы на складе в избытке.',
     trackStatus: null,
   },
@@ -279,7 +279,7 @@ const fallbackProducts: Product[] = [
     sliderStep: 0.5,
     defaultVolume: 3,
     retailStockKg: 38,
-    analyticsTitle: '📉 Скидки: сезонное снижение цены',
+    analyticsTitle: '?? Скидки: сезонное снижение цены',
     analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные оптовые условия.',
     trackStatus: null,
   },
@@ -301,7 +301,7 @@ const fallbackProducts: Product[] = [
     sliderStep: 0.5,
     defaultVolume: 4,
     retailStockKg: 25,
-    analyticsTitle: '📈 Прогноз: ожидается подорожание к концу недели',
+    analyticsTitle: '?? Прогноз: ожидается подорожание к концу недели',
     analyticsText: 'Из-за задержек крупных фур на КПП Маштаково прогнозируется временный дефицит свежей моркови. Рекомендуем зафиксировать объемы.',
     trackSteps: ['Отгружено (Ташкент)', 'Граница (КПП Маштаково)', 'Склад №1 (Уральск)'],
     trackCurrent: 1,
@@ -324,7 +324,7 @@ const fallbackProducts: Product[] = [
     sliderStep: 100,
     defaultVolume: 1500,
     retailStockKg: 50,
-    analyticsTitle: '📊 Аналитика: высокий спрос',
+    analyticsTitle: '?? Аналитика: высокий спрос',
     analyticsText: 'Тепличные томаты пользуются повышенным спросом перед выходными. Объемы на Складе №2 (Охлаждаемый) тают быстро, планируйте закуп заранее.',
     trackStatus: null,
   },
@@ -346,7 +346,7 @@ const fallbackProducts: Product[] = [
     sliderStep: 0.5,
     defaultVolume: 2,
     retailStockKg: 44,
-    analyticsTitle: '📊 Аналитика рынка: цена стабильна',
+    analyticsTitle: '?? Аналитика рынка: цена стабильна',
     analyticsText: 'Белокочанная капуста зафиксировалась в цене. Качество партии отличное, листы плотные, товар готов к длительной транспортировке.',
     trackStatus: null,
   },
@@ -366,8 +366,8 @@ const WAREHOUSE_FILTERS: { id: WarehouseFilterId; label: string }[] = [
 
 const SORT_OPTIONS: { id: SortOption; label: string }[] = [
   { id: 'default', label: 'По умолчанию' },
-  { id: 'price-asc', label: 'По цене ↑' },
-  { id: 'price-desc', label: 'По цене ↓' },
+  { id: 'price-asc', label: 'По цене ^' },
+  { id: 'price-desc', label: 'По цене v' },
 ]
 
 const MOCK_ORDERS: MockOrder[] = [
@@ -1125,6 +1125,7 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
 }
 
 function AdminProductsPanel() {
+  const productFormRef = useRef<HTMLFormElement | null>(null)
   const [products, setProducts] = useState<AdminProduct[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1145,6 +1146,15 @@ function AdminProductsPanel() {
     setForm(emptyAdminProductForm)
     setEditingId(null)
     setFormMode(null)
+  }
+
+  const scrollToProductForm = () => {
+    window.setTimeout(() => {
+      productFormRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
   }
 
   const loadProducts = async () => {
@@ -1207,6 +1217,7 @@ function AdminProductsPanel() {
     setFormMode('create')
     setError(null)
     setSuccess(null)
+    scrollToProductForm()
   }
 
   const startEdit = (product: AdminProduct) => {
@@ -1215,6 +1226,7 @@ function AdminProductsPanel() {
     setFormMode('edit')
     setError(null)
     setSuccess(null)
+    scrollToProductForm()
   }
 
   const updateForm = <K extends keyof AdminProductForm>(key: K, value: AdminProductForm[K]) => {
@@ -1495,7 +1507,11 @@ function AdminProductsPanel() {
       )}
 
       {formMode && (
-        <form onSubmit={saveProduct} className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70">
+        <form
+          ref={productFormRef}
+          onSubmit={saveProduct}
+          className="scroll-mt-24 rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70"
+        >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-lg font-bold text-slate-900">
               {formMode === 'create' ? 'Добавить товар' : 'Редактировать товар'}
@@ -2642,7 +2658,7 @@ function AdminPage() {
                 {formatCurrency(quickCalcTotal)}
               </p>
               <p className="mt-1 text-sm text-slate-500">
-                {toNumber(quickCalcPrice).toLocaleString('ru-RU')} × {toNumber(quickCalcQuantity).toLocaleString('ru-RU')} кг
+                {toNumber(quickCalcPrice).toLocaleString('ru-RU')} ? {toNumber(quickCalcQuantity).toLocaleString('ru-RU')} кг
               </p>
             </div>
             <button
@@ -3602,7 +3618,7 @@ export default function App() {
                   </div>
                   {hasDiscount && (
                     <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white">
-                      −{discount.toFixed(1)}% опт
+                      ?{discount.toFixed(1)}% опт
                     </span>
                   )}
                 </div>
