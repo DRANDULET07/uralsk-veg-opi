@@ -1726,6 +1726,9 @@ function AdminPage() {
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
   const [quickCalcPrice, setQuickCalcPrice] = useState('')
   const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
+  const [mobileOrderFiltersOpen, setMobileOrderFiltersOpen] = useState(false)
+  const [mobileReportFiltersOpen, setMobileReportFiltersOpen] = useState(false)
+  const ordersListRef = useRef<HTMLElement | null>(null)
 
   const loadAdminOrders = async () => {
     setOrdersLoading(true)
@@ -2026,6 +2029,8 @@ function AdminPage() {
     setShowArchivedOrders(false)
     setQuickCalcPrice('')
     setQuickCalcQuantity('')
+    setMobileOrderFiltersOpen(false)
+    setMobileReportFiltersOpen(false)
   }
 
   const updateOrderStatus = async (orderId: string, status: AdminOrderStatus) => {
@@ -2228,30 +2233,31 @@ function AdminPage() {
 
         {activeAdminTab === 'orders' ? (
           <>
-        <header className="mb-5 rounded-3xl bg-brand-900 p-4 text-white shadow-xl shadow-slate-200/70 sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <header className="mb-4 rounded-3xl bg-brand-900 p-3 text-white shadow-xl shadow-slate-200/70 sm:mb-5 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
                 URALSK VEG OPI
               </p>
-              <h1 className="mt-1 text-2xl font-bold">Админка заказов</h1>
-              <p className="mt-1 text-sm text-brand-100">
+              <h1 className="mt-1 text-xl font-bold sm:text-2xl">Админка заказов</h1>
+              <p className="mt-0.5 text-xs text-brand-100 sm:mt-1 sm:text-sm">
                 Новые сверху · данные из Supabase
               </p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 sm:w-auto"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-white transition hover:bg-white/20 sm:h-auto sm:w-auto sm:gap-2 sm:px-4 sm:py-2 sm:text-sm sm:font-bold"
+              aria-label="Выйти"
             >
               <LogOut className="h-4 w-4" />
-              Выйти
+              <span className="hidden sm:inline">Выйти</span>
             </button>
           </div>
 
-          <div className="mt-5 rounded-2xl border border-white/10 bg-white/10 p-3">
-            <div className="grid gap-2 lg:grid-cols-[minmax(18rem,1.4fr)_12rem_12rem_12rem_10rem]">
-              <label className="relative block">
+          <div className="mt-3 rounded-2xl border border-white/10 bg-white/10 p-2 sm:mt-5 sm:p-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] lg:grid-cols-[minmax(18rem,1.4fr)_12rem_12rem_12rem_10rem]">
+              <label className="relative block sm:col-span-1">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60"
                   aria-hidden
@@ -2264,10 +2270,17 @@ function AdminPage() {
                   className="h-11 w-full rounded-xl border border-white/20 bg-white/10 py-2 pl-10 pr-3 text-sm font-semibold text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-white/30"
                 />
               </label>
+              <button
+                type="button"
+                onClick={() => setMobileOrderFiltersOpen((value) => !value)}
+                className="flex h-11 items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-bold text-white transition hover:bg-white/20 lg:hidden"
+              >
+                Фильтры
+              </button>
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
-                className="h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
+                className={`${mobileOrderFiltersOpen ? 'block' : 'hidden'} h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 sm:col-span-3 lg:col-span-1 lg:block [&_option]:text-slate-800`}
               >
                 {ADMIN_STATUS_OPTIONS.map((status) => (
                   <option key={status.id} value={status.id}>
@@ -2278,7 +2291,7 @@ function AdminPage() {
               <select
                 value={periodPreset}
                 onChange={(event) => setPeriodPreset(event.target.value as AdminPeriodPreset)}
-                className="h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
+                className={`${mobileOrderFiltersOpen ? 'block' : 'hidden'} h-11 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 sm:col-span-3 lg:col-span-1 lg:block [&_option]:text-slate-800`}
               >
                 {ADMIN_PERIOD_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -2287,7 +2300,7 @@ function AdminPage() {
                 ))}
               </select>
               <label
-                className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
+                className={`${mobileOrderFiltersOpen ? 'flex' : 'hidden'} h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition sm:col-span-3 lg:col-span-1 lg:flex ${
                   showArchivedOrders
                     ? 'border-white bg-white text-brand-800'
                     : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
@@ -2305,7 +2318,7 @@ function AdminPage() {
                 type="button"
                 onClick={loadAdminOrders}
                 disabled={ordersLoading}
-                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-3 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70 sm:px-4"
               >
                 <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
                 Обновить
@@ -2313,7 +2326,7 @@ function AdminPage() {
             </div>
 
             {periodPreset === 'custom' && (
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:w-[24.5rem]">
+              <div className={`${mobileOrderFiltersOpen ? 'grid' : 'hidden'} mt-3 gap-2 sm:grid-cols-2 lg:grid lg:w-[24.5rem]`}>
                 <label className="block">
                   <span className="text-xs font-semibold uppercase tracking-wide text-brand-100">
                     С
@@ -2340,32 +2353,32 @@ function AdminPage() {
             )}
           </div>
 
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+          <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-4 lg:grid-cols-7">
+            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
               <p className="text-xs text-brand-100">Всего заказов</p>
-              <p className="text-xl font-bold">{statsOrders.length}</p>
+              <p className="text-lg font-bold sm:text-xl">{statsOrders.length}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
               <p className="text-xs text-brand-100">Новые</p>
-              <p className="text-xl font-bold">{statusStats.new}</p>
+              <p className="text-lg font-bold sm:text-xl">{statusStats.new}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
               <p className="text-xs text-brand-100">В работе</p>
-              <p className="text-xl font-bold">{statusStats.processing}</p>
+              <p className="text-lg font-bold sm:text-xl">{statusStats.processing}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
               <p className="text-xs text-brand-100">Выполненные</p>
-              <p className="text-xl font-bold">{statusStats.completed}</p>
+              <p className="text-lg font-bold sm:text-xl">{statusStats.completed}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
               <p className="text-xs text-brand-100">Выручка</p>
-              <p className="text-lg font-bold">{formatCurrency(statusStats.revenue)}</p>
+              <p className="text-base font-bold sm:text-lg">{formatCurrency(statusStats.revenue)}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
               <p className="text-xs text-brand-100">Ожидаемая сумма</p>
               <p className="text-lg font-bold">{formatCurrency(statusStats.expected)}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3">
+            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
               <p className="text-xs text-brand-100">Отменено</p>
               <p className="text-lg font-bold">{formatCurrency(statusStats.cancelledAmount)}</p>
             </div>
@@ -2373,14 +2386,24 @@ function AdminPage() {
         </header>
 
         <section className="mb-5 grid gap-4 xl:grid-cols-2">
-          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70 xl:col-span-2">
+          <div className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70 sm:p-5 xl:col-span-2">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Фильтр отчёта</h2>
                 <p className="text-sm text-slate-500">
-                  Эти фильтры управляют финансами, топами и аналитикой ниже
+                  {reportSummary}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setMobileReportFiltersOpen((value) => !value)}
+                className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 sm:hidden"
+              >
+                {mobileReportFiltersOpen ? 'Скрыть' : 'Настроить отчёт'}
+              </button>
+              <p className="hidden text-sm text-slate-500 sm:block">
+                Эти фильтры управляют финансами, топами и аналитикой ниже
+              </p>
               <button
                 type="button"
                 onClick={() => {
@@ -2391,12 +2414,12 @@ function AdminPage() {
                   setReportReceivingType('all')
                   setReportStatusMode('all')
                 }}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                className={`${mobileReportFiltersOpen ? 'block' : 'hidden'} rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 sm:block`}
               >
                 Сбросить фильтры
               </button>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className={`${mobileReportFiltersOpen ? 'flex' : 'hidden'} mt-4 flex-wrap gap-2 sm:flex`}>
               {ADMIN_PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option.id}
@@ -2414,7 +2437,7 @@ function AdminPage() {
             </div>
 
             {reportPeriod === 'custom' && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:w-[24rem]">
+              <div className={`${mobileReportFiltersOpen ? 'grid' : 'hidden'} mt-4 gap-3 sm:grid sm:grid-cols-2 lg:w-[24rem]`}>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">Дата С</span>
                   <input
@@ -2436,7 +2459,7 @@ function AdminPage() {
               </div>
             )}
 
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <div className={`${mobileReportFiltersOpen ? 'grid' : 'hidden'} mt-4 gap-3 sm:grid lg:grid-cols-3`}>
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
                 <select
@@ -2482,7 +2505,7 @@ function AdminPage() {
             </div>
           </div>
 
-          <div className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70 xl:col-span-2">
+          <div className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70 sm:p-5 xl:col-span-2">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Финансы за выбранный период</h2>
@@ -2494,60 +2517,60 @@ function AdminPage() {
                 {reportFilteredOrders.length} заказов
               </p>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <div className="rounded-2xl bg-emerald-50 px-4 py-3">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
+              <div className="rounded-2xl bg-emerald-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-emerald-700">Выручка</p>
-                <p className="mt-1 text-xl font-bold text-emerald-900">
+                <p className="mt-1 text-base font-bold text-emerald-900 sm:text-xl">
                   {formatCurrency(orderAnalytics.completedRevenue)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-amber-50 px-4 py-3">
+              <div className="rounded-2xl bg-amber-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-amber-700">Ожидаемая сумма</p>
-                <p className="mt-1 text-xl font-bold text-amber-900">
+                <p className="mt-1 text-base font-bold text-amber-900 sm:text-xl">
                   {formatCurrency(orderAnalytics.expectedAmount)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-slate-100 px-4 py-3">
+              <div className="hidden rounded-2xl bg-slate-100 px-3 py-2 sm:px-4 sm:py-3 lg:block">
                 <p className="text-xs font-semibold uppercase text-slate-500">Отменённая сумма</p>
                 <p className="mt-1 text-xl font-bold text-slate-800">
                   {formatCurrency(orderAnalytics.cancelledAmount)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-brand-50 px-4 py-3">
+              <div className="rounded-2xl bg-brand-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-brand-700">Общий оборот</p>
-                <p className="mt-1 text-xl font-bold text-brand-900">
+                <p className="mt-1 text-base font-bold text-brand-900 sm:text-xl">
                   {formatCurrency(orderAnalytics.totalTurnover)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-sky-50 px-4 py-3">
+              <div className="rounded-2xl bg-sky-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-sky-700">Средний чек</p>
-                <p className="mt-1 text-xl font-bold text-sky-900">
+                <p className="mt-1 text-base font-bold text-sky-900 sm:text-xl">
                   {formatCurrency(orderAnalytics.averageCheck)}
                 </p>
               </div>
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">Всего кг</p>
-                <p className="mt-1 text-lg font-bold text-slate-900">
+                <p className="mt-1 text-base font-bold text-slate-900 sm:text-lg">
                   {formatKg(orderAnalytics.totalWeightKg)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">Выполнено кг</p>
-                <p className="mt-1 text-lg font-bold text-slate-900">
+                <p className="mt-1 text-base font-bold text-slate-900 sm:text-lg">
                   {formatKg(orderAnalytics.completedWeightKg)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">Ожидается кг</p>
-                <p className="mt-1 text-lg font-bold text-slate-900">
+                <p className="mt-1 text-base font-bold text-slate-900 sm:text-lg">
                   {formatKg(orderAnalytics.expectedWeightKg)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 sm:px-4 sm:py-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">Отменено кг</p>
-                <p className="mt-1 text-lg font-bold text-slate-900">
+                <p className="mt-1 text-base font-bold text-slate-900 sm:text-lg">
                   {formatKg(orderAnalytics.cancelledWeightKg)}
                 </p>
               </div>
@@ -2674,6 +2697,21 @@ function AdminPage() {
           </div>
         </section>
 
+        <div className="mb-4 sm:hidden">
+          <button
+            type="button"
+            onClick={() =>
+              ordersListRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+              })
+            }
+            className="w-full rounded-xl bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800"
+          >
+            К заказам
+          </button>
+        </div>
+
         {ordersError && (
           <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
             {ordersError}
@@ -2689,7 +2727,7 @@ function AdminPage() {
             Заказов по выбранному фильтру нет.
           </div>
         ) : (
-          <main className="grid gap-4 xl:grid-cols-2">
+          <main ref={ordersListRef} className="scroll-mt-4 grid gap-4 xl:grid-cols-2">
             {filteredOrders.map((order) => (
               <article
                 key={order.id}
