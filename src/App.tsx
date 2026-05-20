@@ -298,14 +298,16 @@ function formatVolumeLabel(_product: Product, volume: number, _isB2B = true): st
   return `${formatMoney(volume)} кг`
 }
 
-function formatVolumeWhatsApp(_product: Product, volume: number, isB2B = true): string {
-  if (isB2B) {
-    const tons = volume / 1000
-    const label = Number.isInteger(tons) ? String(tons) : tons.toFixed(1)
-    return `${label} тонн`
-  }
+function formatQuantityWhatsApp(volume: number, isB2B = true): string {
+  if (!isB2B || volume < 1000) return `${formatMoney(volume)} кг`
 
-  return `${formatMoney(volume)} кг`
+  const tons = volume / 1000
+  const label = Number.isInteger(tons) ? String(tons) : tons.toFixed(1)
+  return `${label} тонн`
+}
+
+function formatVolumeWhatsApp(_product: Product, volume: number, isB2B = true): string {
+  return formatQuantityWhatsApp(volume, isB2B)
 }
 
 function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
@@ -353,9 +355,7 @@ function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: 
   })
 
   const totalVolume = lines.reduce((sum, line) => sum + line.volume, 0)
-  const volumeLabel = isB2B
-    ? `${Number.isInteger(totalVolume / 1000) ? totalVolume / 1000 : (totalVolume / 1000).toFixed(1)} тонн`
-    : `${formatMoney(totalVolume)} кг`
+  const volumeLabel = formatQuantityWhatsApp(totalVolume, isB2B)
 
   return [
     'Здравствуйте! Хочу забронировать овощи:',
@@ -521,7 +521,7 @@ function RetailQuantityInput({
 
 function ProductSkeleton() {
   return (
-    <article className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70">
+    <article className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70">
       <div className="relative h-48 w-full overflow-hidden bg-slate-200">
         <div className="absolute inset-0 animate-pulse bg-slate-300" />
       </div>
@@ -762,15 +762,16 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-md bg-slate-100 pb-24">
+    <div className="min-h-dvh bg-slate-100 pb-24 lg:pb-10">
       <div className="relative border-b border-slate-200 bg-white shadow-sm">
-        <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white">
+        <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:px-6">
+          <div className="mx-auto w-full max-w-[1400px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-100/80">
                 URALSK VEG OPI
               </p>
-              <h1 className="mt-1 text-xl font-bold leading-tight tracking-tight">
+              <h1 className="mt-1 text-xl font-bold leading-tight tracking-tight sm:text-2xl lg:text-3xl">
                 ОПТ ОВОЩИ УРАЛЬСК
               </h1>
             </div>
@@ -799,7 +800,7 @@ export default function App() {
               <Leaf className="h-9 w-9 text-brand-100" strokeWidth={1.5} aria-hidden />
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-white/10 p-1 text-sm text-white" role="tablist" aria-label="Тип покупателя">
+          <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-white/10 p-1 text-sm text-white sm:max-w-md" role="tablist" aria-label="Тип покупателя">
             <button
               type="button"
               onClick={() => setIsB2B(true)}
@@ -831,9 +832,11 @@ export default function App() {
             <CalendarCheck className="h-4 w-4 shrink-0" aria-hidden />
             <span>Цены и остатки актуальны на сегодня — {today}</span>
           </div>
+          </div>
         </header>
 
-        <div className="bg-white px-3 py-3">
+        <div className="bg-white px-3 py-3 lg:px-6">
+          <div className="mx-auto w-full max-w-[1400px]">
           <label className="relative block">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -860,10 +863,10 @@ export default function App() {
           </label>
 
           <div
-            className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5"
+            className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5 md:flex md:items-center md:gap-3 md:space-y-0"
             aria-label="Расширенные фильтры"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 md:min-w-[17rem]">
               <MapPin className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
               <select
                 value={warehouseFilter}
@@ -879,7 +882,7 @@ export default function App() {
               </select>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 md:flex-1">
               <button
                 type="button"
                 onClick={() => setOnlyInStock((v) => !v)}
@@ -893,7 +896,7 @@ export default function App() {
                 Только в наличии
               </button>
 
-              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 md:max-w-xs">
                 <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                 <select
                   value={sortBy}
@@ -929,10 +932,12 @@ export default function App() {
               ))}
             </div>
           </nav>
+          </div>
         </div>
       </div>
 
-      <main className="space-y-4 px-3 pt-4">
+      <main className="mx-auto grid w-full max-w-[1400px] gap-6 px-3 pt-4 sm:px-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:px-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="min-w-0 space-y-4">
         {lastOrder && (
           <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -974,7 +979,7 @@ export default function App() {
         )}
 
         {isLoading || productsLoading ? (
-          <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[...Array(4)].map((_, index) => (
               <ProductSkeleton key={index} />
             ))}
@@ -988,7 +993,8 @@ export default function App() {
                 : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
           </p>
         ) : (
-          filteredProducts.map((product) => {
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredProducts.map((product) => {
           const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
           const { discount, pricePerKg, total } = calcPricing(product, volume, isB2B)
           const hasDiscount = discount > 0
@@ -1006,7 +1012,7 @@ export default function App() {
           return (
             <article
               key={product.id}
-              className="mb-6 overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
+              className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
             >
               <div
                 className={`group relative w-full overflow-hidden bg-slate-200 ${
@@ -1046,7 +1052,7 @@ export default function App() {
 
               {productTitle}
 
-              <div className="space-y-4 p-5">
+              <div className="flex flex-1 flex-col space-y-4 p-5">
                 <div
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium ${statusToneClass[product.statusTone]}`}
                 >
@@ -1277,10 +1283,116 @@ export default function App() {
               </div>
             </article>
           )
-        }))}
+          })}
+          </div>
+        )}
+        </div>
+
+        <aside className="hidden lg:block">
+          <div className="sticky top-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+            <div className="border-b border-slate-100 bg-brand-900 px-5 py-4 text-white">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold">
+                    {isB2B ? 'Оптовая корзина' : 'Розничная корзина'}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-brand-100">
+                    {cartCount}{' '}
+                    {cartCount === 1 ? 'позиция' : cartCount < 5 ? 'позиции' : 'позиций'}
+                  </p>
+                </div>
+                <ShoppingCart className="h-6 w-6 text-brand-100" aria-hidden />
+              </div>
+            </div>
+
+            <div className="max-h-[calc(100dvh-18rem)] overflow-y-auto px-5 py-4">
+              {cartLines.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  Добавьте овощи из каталога, и заказ появится здесь.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {cartLines.map((line) => (
+                    <li
+                      key={line.product.id}
+                      className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    >
+                      {line.product.image ? (
+                        <img
+                          src={line.product.image}
+                          alt=""
+                          className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
+                          Фото скоро
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-800">{line.product.name}</p>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(line.product.id)}
+                            className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                            aria-label={`Удалить ${line.product.name} из корзины`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
+                        <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
+                          {formatCurrency(line.total)}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {cartLines.length > 0 && (
+              <div className="border-t border-slate-100 bg-white px-5 py-4">
+                {cartError && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
+                    {cartError}
+                    <a
+                      href={getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 block font-bold text-amber-950 underline"
+                    >
+                      Открыть WhatsApp вручную
+                    </a>
+                  </div>
+                )}
+                <div className="mb-3 flex items-center justify-between gap-3 text-slate-800">
+                  <span className="text-sm font-semibold">Итого</span>
+                  <span className="text-lg font-bold tabular-nums text-brand-800">
+                    {formatCurrency(cartGrandTotal)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBookCart}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
+                >
+                  {isB2B ? 'Забронировать в WhatsApp' : 'Оформить в WhatsApp'}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearCart}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  Очистить корзину
+                </button>
+              </div>
+            )}
+          </div>
+        </aside>
       </main>
 
-      <footer className="px-4 pt-6 text-center text-xs text-slate-500">
+      <footer className="mx-auto max-w-[1400px] px-4 pt-6 text-center text-xs text-slate-500 lg:px-6">
         Оптово-розничная витрина · Уральск, Казахстан · Цены в тенге
       </footer>
 
@@ -1288,7 +1400,7 @@ export default function App() {
         <button
           type="button"
           onClick={() => setCartOpen(true)}
-          className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-xl transition hover:bg-brand-800 active:scale-95"
+          className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-xl transition hover:bg-brand-800 active:scale-95 lg:hidden"
           aria-label={`Открыть корзину: ${cartCount} позиций`}
         >
           <ShoppingCart className="h-6 w-6" strokeWidth={2} />
