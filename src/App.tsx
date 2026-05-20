@@ -749,16 +749,11 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
+    <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-slate-800">Количество</p>
           <p className="mt-0.5 text-xs font-medium text-slate-500">{minHint}</p>
-          <p
-            className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${stockDisplay.className}`}
-          >
-            {stockDisplay.label}
-          </p>
           {isBelowMinimum && (
             <p className="mt-2 text-xs font-bold text-amber-700">
               Остаток меньше минимального заказа
@@ -773,12 +768,12 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
         </span>
       </div>
 
-      <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="grid grid-cols-[2.5rem_1fr_2.5rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
         <button
           type="button"
           onClick={() => commitValue(currentQuantity - step)}
           disabled={!canDecrease}
-          className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+          className="flex h-11 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
           aria-label={`Уменьшить количество ${product.name}`}
         >
           <Minus className="h-5 w-5" aria-hidden />
@@ -802,7 +797,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
               const parsed = Number(e.target.value)
               commitValue(Number.isNaN(parsed) || e.target.value === '' ? cfg.sliderMin : parsed)
             }}
-            className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none disabled:text-slate-300"
+            className="w-full bg-transparent text-center text-base font-bold tabular-nums text-emerald-800 outline-none disabled:text-slate-300"
             aria-label={`Количество ${product.name} в килограммах`}
           />
           <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
@@ -811,7 +806,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
           type="button"
           onClick={() => commitValue(currentQuantity + step)}
           disabled={!canIncrease}
-          className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+          className="flex h-11 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
           aria-label={`Увеличить количество ${product.name}`}
         >
           <Plus className="h-5 w-5" aria-hidden />
@@ -819,7 +814,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
       </div>
 
       {quickQuantities.length > 0 && (
-        <div className="mt-3 grid grid-cols-5 gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {quickQuantities.map((quantity) => {
             const selected = currentQuantity === quantity
             return (
@@ -828,7 +823,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
                 type="button"
                 onClick={() => commitValue(quantity)}
                 aria-pressed={selected}
-                className={`min-h-9 rounded-lg border px-1.5 text-xs font-bold transition active:scale-[0.98] ${
+                className={`min-h-8 flex-1 basis-[4rem] rounded-lg border px-1.5 text-xs font-bold transition active:scale-[0.98] ${
                   selected
                     ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
@@ -3586,40 +3581,27 @@ export default function App() {
           const justAdded = addedProductId === product.id
           const stockDisplay = getStockDisplay(product)
           const cannotOrderProduct = !canOrderProduct(product, isB2B)
-          const analyticsActionClass = 'bg-white text-emerald-700'
+          const analyticsActionClass = 'bg-white text-slate-600'
           const productImage = product.image_url || product.image
-          const productTitle = productImage ? null : (
-            <div className="px-5 pt-5">
-              <p className="text-xs font-medium text-slate-500">{product.subtitle}</p>
-              <h2 className="text-2xl font-bold text-slate-900">{product.name}</h2>
-            </div>
-          )
+          const secondaryPrice = isB2B
+            ? product.retail_price ?? product.basePrice + RETAIL_MARKUP
+            : product.wholesale_price ?? product.basePrice
+          const primaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
+          const secondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
 
           return (
             <article
               key={product.id}
-              className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
+              className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-lg shadow-slate-200/70 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-200/80"
             >
-              <div
-                className={`group relative w-full overflow-hidden bg-slate-200 ${
-                  productImage ? 'h-48' : 'h-28'
-                }`}
-              >
+              <div className="group relative h-40 w-full overflow-hidden bg-slate-100 sm:h-48">
                 <ProductImage
                   src={productImage}
                   alt={product.name}
                   className="h-full bg-slate-50"
                   imgClassName="h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
+                  fallbackClassName="text-sm font-semibold text-slate-500"
                 />
-                {productImage && <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />}
-                <div className={productImage ? 'absolute bottom-4 left-4 right-4' : 'sr-only'}>
-                  <p className={`text-xs font-medium ${productImage ? 'text-white/90' : 'text-slate-600'}`}>
-                    {product.subtitle}
-                  </p>
-                  <h2 className={`text-2xl font-bold ${productImage ? 'text-white' : 'text-slate-900'}`}>
-                    {product.name}
-                  </h2>
-                </div>
                 {inCart && (
                   <span className="absolute right-3 top-3 rounded-full bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
                     В корзине
@@ -3627,21 +3609,35 @@ export default function App() {
                 )}
               </div>
 
-              {productTitle}
-
-              <div className="flex flex-1 flex-col space-y-4 p-5">
-                <div
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium ${statusToneClass[product.statusTone]}`}
-                >
-                  {product.statusText}
+              <div className="flex flex-1 flex-col space-y-3 p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      {product.category ?? product.subtitle}
+                    </p>
+                    <h2 className="mt-1 text-xl font-bold leading-tight text-slate-900">
+                      {product.name}
+                    </h2>
+                    {product.variant && (
+                      <p className="mt-0.5 text-sm font-semibold text-slate-500">
+                        {product.variant}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-bold ${statusToneClass[product.statusTone]}`}
+                  >
+                    {product.is_in_transit ? 'В пути' : stockDisplay.stock > 0 ? 'В наличии' : 'Нет'}
+                  </span>
                 </div>
 
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="rounded-2xl bg-brand-50 px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Базовая цена
+                      {primaryPriceLabel}
                     </p>
-                    <p className="text-2xl font-bold text-brand-800">
+                    <p className="mt-1 text-2xl font-bold text-brand-900">
                       {hasDiscount ? (
                         <>
                           <span className="mr-2 text-base font-normal text-slate-400 line-through">
@@ -3653,14 +3649,21 @@ export default function App() {
                         <>{formatCurrency(pricePerKg)}/кг</>
                       )}
                     </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">
+                      {secondaryPriceLabel}: {formatCurrency(secondaryPrice)}/кг
+                    </p>
                   </div>
                   {hasDiscount && (
-                    <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white">
+                    <span className="shrink-0 rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white">
                       ?{discount.toFixed(1)}% опт
                     </span>
                   )}
+                  </div>
                 </div>
 
+                <p className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-bold ${stockDisplay.className}`}>
+                  {stockDisplay.label}
+                </p>
                 <p className="flex items-center gap-1.5 text-sm text-slate-600">
                   <Scale className="h-4 w-4 text-brand-600" aria-hidden />
                   {isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'}
@@ -3715,28 +3718,26 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-emerald-950">
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-slate-700">
                   <button
                     type="button"
                     onClick={() => toggleAnalytics(product.id)}
                     className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold transition"
                   >
                     <span>{product.analyticsTitle}</span>
-                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${analyticsActionClass}`}>
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${analyticsActionClass}`}>
                       {analyticsOpenId === product.id ? 'Скрыть' : 'Подробнее'}
                     </span>
                   </button>
 
                   {analyticsOpenId === product.id && (
-                    <div className="mt-3 rounded-lg bg-white/60 p-3 text-sm leading-relaxed">
+                    <div className="mt-3 rounded-xl bg-white p-3 text-sm leading-relaxed text-slate-600">
                       <p>{product.analyticsText}</p>
                     </div>
                   )}
                 </div>
 
-                <hr className="border-gray-100" />
-
-                <div>
+                <div className="mt-auto space-y-3 border-t border-slate-100 pt-3">
                   <QuantitySelector
                     product={product}
                     value={volume}
@@ -3744,8 +3745,8 @@ export default function App() {
                     onChange={(nextVolume) => setProductVolume(product, nextVolume)}
                   />
                   <p
-                    className={`mt-4 text-center text-xl font-bold ${
-                      hasDiscount ? 'text-emerald-700' : 'text-slate-800'
+                    className={`rounded-2xl bg-slate-50 px-4 py-3 text-center text-xl font-bold tabular-nums ${
+                      hasDiscount ? 'text-emerald-700' : 'text-slate-900'
                     }`}
                   >
                     Итого за {formatVolumeLabel(product, volume, isB2B)}:{' '}
@@ -3756,13 +3757,11 @@ export default function App() {
                       Прогрессивный опт: выгода {discount.toFixed(1)}% от базовой цены
                     </p>
                   )}
-                </div>
-
                 <button
                   type="button"
                   onClick={() => addToCart(product)}
                   disabled={cannotOrderProduct}
-                  className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
+                  className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
                     cannotOrderProduct
                       ? 'cursor-not-allowed bg-slate-200 text-slate-500 shadow-none hover:shadow-md'
                       : justAdded
@@ -3796,6 +3795,7 @@ export default function App() {
                           : 'В корзину'}
                   </span>
                 </button>
+                </div>
               </div>
             </article>
           )
@@ -3823,9 +3823,15 @@ export default function App() {
 
             <div className="max-h-[calc(100dvh-18rem)] overflow-y-auto px-5 py-4">
               {cartLines.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-                  Добавьте овощи из каталога, и заказ появится здесь.
-                </p>
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-brand-700 shadow-sm">
+                    <ShoppingCart className="h-5 w-5" aria-hidden />
+                  </div>
+                  <p className="mt-3 text-sm font-bold text-slate-800">Корзина пока пустая</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Выберите товар и нажмите «В корзину».
+                  </p>
+                </div>
               ) : (
                 <ul className="space-y-3">
                   {cartLines.map((line) => (
