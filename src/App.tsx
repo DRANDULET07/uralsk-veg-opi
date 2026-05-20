@@ -170,6 +170,23 @@ const FULFILLMENT_LABELS: Record<FulfillmentType, string> = {
   delivery: 'Доставка',
 }
 
+const CUSTOMER_TYPE_OPTIONS: { value: CustomerType; label: string }[] = [
+  { value: 'retail', label: 'Розница' },
+  { value: 'wholesale', label: 'Оптовик' },
+  { value: 'shop', label: 'Магазин' },
+  { value: 'cafe', label: 'Кафе' },
+]
+
+const ORDER_TYPE_OPTIONS: { value: OrderType; label: string }[] = [
+  { value: 'retail', label: 'Розничный' },
+  { value: 'wholesale', label: 'Оптовый' },
+]
+
+const FULFILLMENT_OPTIONS: { value: FulfillmentType; label: string }[] = [
+  { value: 'pickup', label: 'Самовывоз' },
+  { value: 'delivery', label: 'Доставка' },
+]
+
 const ADMIN_STATUS_LABELS: Record<AdminOrderStatus, string> = {
   new: 'Новый',
   processing: 'В работе',
@@ -589,6 +606,243 @@ function createCheckoutForm(isB2B: boolean): CheckoutForm {
     address: '',
     comment: '',
   }
+}
+
+interface CheckoutFormContentProps {
+  checkoutStep: 'cart' | 'details'
+  checkoutForm: CheckoutForm
+  checkoutErrors: Partial<Record<keyof CheckoutForm, string>>
+  checkoutSubmitError: string | null
+  checkoutSuccessMessage: string | null
+  isSubmittingOrder: boolean
+  cartCount: number
+  cartGrandTotal: number
+  isB2B: boolean
+  cartLines: CartLine[]
+  onBack?: () => void
+  updateCheckoutField: (field: keyof CheckoutForm, value: string) => void
+}
+
+function CheckoutFormContent({
+  checkoutStep,
+  checkoutForm,
+  checkoutErrors,
+  checkoutSubmitError,
+  checkoutSuccessMessage,
+  isSubmittingOrder,
+  cartCount,
+  cartGrandTotal,
+  isB2B,
+  cartLines,
+  onBack,
+  updateCheckoutField,
+}: CheckoutFormContentProps) {
+  return (
+    <div className="space-y-4 px-5 pb-4 pt-4 sm:grid sm:grid-cols-[1.2fr_0.8fr] sm:gap-4 sm:pb-6">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+              {checkoutStep === 'details' ? 'Шаг 2 из 2' : 'Оформление заказа'}
+            </p>
+            <h3 className="mt-2 text-xl font-bold text-brand-900">Данные для WhatsApp</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Заполните контакты, чтобы мы могли отправить заказ напрямую в WhatsApp.
+            </p>
+          </div>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              ← Назад к корзине
+            </button>
+          )}
+        </div>
+
+        {checkoutSuccessMessage && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+            {checkoutSuccessMessage}
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">Имя</span>
+            <input
+              type="text"
+              value={checkoutForm.name}
+              onChange={(e) => updateCheckoutField('name', e.target.value)}
+              className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              placeholder="Иван"
+            />
+            {checkoutErrors.name && (
+              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.name}</p>
+            )}
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">Телефон</span>
+            <input
+              type="tel"
+              value={checkoutForm.phone}
+              onChange={(e) => updateCheckoutField('phone', e.target.value)}
+              className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              placeholder="+7 777 123 45 67"
+            />
+            {checkoutErrors.phone && (
+              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.phone}</p>
+            )}
+          </label>
+
+          <div className="sm:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {CUSTOMER_TYPE_OPTIONS.map((option) => {
+                const selected = checkoutForm.customerType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateCheckoutField('customerType', option.value)}
+                    aria-pressed={selected}
+                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition focus:outline-none ${
+                      selected
+                        ? 'border-brand-700 bg-brand-700 text-white shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+            {checkoutErrors.customerType && (
+              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.customerType}</p>
+            )}
+          </div>
+
+          <div className="sm:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Тип заказа</span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {ORDER_TYPE_OPTIONS.map((option) => {
+                const selected = checkoutForm.orderType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateCheckoutField('orderType', option.value)}
+                    aria-pressed={selected}
+                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition focus:outline-none ${
+                      selected
+                        ? 'border-brand-700 bg-brand-700 text-white shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+            {checkoutErrors.orderType && (
+              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.orderType}</p>
+            )}
+          </div>
+
+          <div className="sm:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Получение</span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {FULFILLMENT_OPTIONS.map((option) => {
+                const selected = checkoutForm.fulfillment === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateCheckoutField('fulfillment', option.value)}
+                    aria-pressed={selected}
+                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition focus:outline-none ${
+                      selected
+                        ? 'border-brand-700 bg-brand-700 text-white shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+            {checkoutErrors.fulfillment && (
+              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.fulfillment}</p>
+            )}
+          </div>
+
+          {checkoutForm.fulfillment === 'delivery' && (
+            <label className="sm:col-span-2 block">
+              <span className="text-sm font-semibold text-slate-700">Адрес доставки</span>
+              <input
+                type="text"
+                value={checkoutForm.address}
+                onChange={(e) => updateCheckoutField('address', e.target.value)}
+                className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                placeholder="Уральск, ул. Абая 10"
+              />
+              {checkoutErrors.address && (
+                <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.address}</p>
+              )}
+            </label>
+          )}
+
+          <label className="sm:col-span-2 block">
+            <span className="text-sm font-semibold text-slate-700">Комментарий</span>
+            <textarea
+              value={checkoutForm.comment}
+              onChange={(e) => updateCheckoutField('comment', e.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              placeholder="Доставить после 18:00"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+        <div>
+          <p className="text-sm font-semibold text-slate-700">Сводка заказа</p>
+          <p className="mt-2 text-sm text-slate-600">Проверьте сумму и добавьте комментарий перед отправкой.</p>
+        </div>
+        <div className="rounded-3xl bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between text-sm text-slate-600">
+            <span>Позиции</span>
+            <span>{cartCount}</span>
+          </div>
+          <div className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">
+            <p className="flex items-center justify-between font-semibold text-slate-800">
+              <span>Всего к оплате</span>
+              <span className="tabular-nums">{formatCurrency(cartGrandTotal)}</span>
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              {isB2B ? 'Для оптового заказа' : 'Для розничного заказа'} · {formatQuantityWhatsApp(cartLines.reduce((sum, line) => sum + line.volume, 0), isB2B)}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={isSubmittingOrder}
+          className="flex w-full items-center justify-center gap-2 rounded-3xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d] disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
+        >
+          {isSubmittingOrder ? 'Создаём заказ...' : 'Отправить в WhatsApp'}
+        </button>
+
+        {checkoutSubmitError && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {checkoutSubmitError}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
@@ -2676,7 +2930,7 @@ function AdminPage() {
                 {formatCurrency(quickCalcTotal)}
               </p>
               <p className="mt-1 text-sm text-slate-500">
-                {toNumber(quickCalcPrice).toLocaleString('ru-RU')} ? {toNumber(quickCalcQuantity).toLocaleString('ru-RU')} кг
+                {toNumber(quickCalcPrice).toLocaleString('ru-RU')} × {toNumber(quickCalcQuantity).toLocaleString('ru-RU')} кг
               </p>
             </div>
             <button
@@ -2954,6 +3208,8 @@ export default function App() {
   )
   const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({})
   const [checkoutSubmitError, setCheckoutSubmitError] = useState<string | null>(null)
+  const [checkoutSuccessMessage, setCheckoutSuccessMessage] = useState<string | null>(null)
+  const [checkoutStep, setCheckoutStep] = useState<'cart' | 'details'>('cart')
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false)
   const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
@@ -3033,6 +3289,13 @@ export default function App() {
       if (element) {
         element.removeEventListener('touchmove', handleNativeTouchMove)
       }
+    }
+  }, [cartOpen])
+
+  useEffect(() => {
+    if (!cartOpen) {
+      setCheckoutStep('cart')
+      setCheckoutSuccessMessage(null)
     }
   }, [cartOpen])
 
@@ -3214,6 +3477,8 @@ export default function App() {
     setCheckoutOpen(false)
     setCheckoutErrors({})
     setCheckoutSubmitError(null)
+    setCheckoutSuccessMessage(null)
+    setCheckoutStep('cart')
   }
 
   const saveOrderToStorage = (order: SavedOrder) => {
@@ -3272,6 +3537,7 @@ export default function App() {
     setCartError(null)
     setCheckoutErrors({})
     setCheckoutSubmitError(null)
+    setCheckoutSuccessMessage(null)
     setCheckoutForm((prev) => ({
       ...prev,
       orderType: isB2B ? 'wholesale' : 'retail',
@@ -3399,7 +3665,15 @@ export default function App() {
       }
 
       saveOrderToStorage(order)
-      window.location.href = whatsappUrl
+      setCheckoutSuccessMessage('Заказ создан. Сейчас откроется WhatsApp.')
+      setCart({})
+      setCartError(null)
+      setCheckoutErrors({})
+      setCheckoutSubmitError(null)
+
+      window.setTimeout(() => {
+        window.location.href = whatsappUrl
+      }, 500)
     } catch (error) {
       setCheckoutSubmitError(getErrorMessage(error))
     } finally {
@@ -4070,52 +4344,77 @@ export default function App() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              {cartLines.length === 0 ? (
-                <p className="py-8 text-center text-sm text-slate-500">
-                  Корзина пуста. Добавьте овощи из каталога.
-                </p>
+              {checkoutStep === 'cart' ? (
+                cartLines.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-500">
+                    Корзина пуста. Добавьте овощи из каталога.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {cartLines.map((line) => (
+                      <li
+                        key={line.product.id}
+                        className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                      >
+                        {line.product.image ? (
+                          <img
+                            src={line.product.image}
+                            alt=""
+                            className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
+                            Фото скоро
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="font-semibold text-slate-800">{line.product.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(line.product.id)}
+                              className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                              aria-label={`Удалить ${line.product.name} из корзины`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
+                          <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
+                            {formatCurrency(line.total)}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )
               ) : (
-                <ul className="space-y-3">
-                  {cartLines.map((line) => (
-                    <li
-                      key={line.product.id}
-                      className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
-                    >
-                      {line.product.image ? (
-                        <img
-                          src={line.product.image}
-                          alt=""
-                          className="h-16 w-16 shrink-0 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
-                          Фото скоро
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-semibold text-slate-800">{line.product.name}</p>
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(line.product.id)}
-                            className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
-                            aria-label={`Удалить ${line.product.name} из корзины`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                        <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
-                        <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
-                          {formatCurrency(line.total)}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <form
+                  className="space-y-4"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleSubmitCheckout()
+                  }}
+                >
+                  <CheckoutFormContent
+                    checkoutStep={checkoutStep}
+                    checkoutForm={checkoutForm}
+                    checkoutErrors={checkoutErrors}
+                    checkoutSubmitError={checkoutSubmitError}
+                    checkoutSuccessMessage={checkoutSuccessMessage}
+                    isSubmittingOrder={isSubmittingOrder}
+                    cartCount={cartCount}
+                    cartGrandTotal={cartGrandTotal}
+                    isB2B={isB2B}
+                    cartLines={cartLines}
+                    onBack={() => setCheckoutStep('cart')}
+                    updateCheckoutField={updateCheckoutField}
+                  />
+                </form>
               )}
             </div>
 
-            {cartLines.length > 0 && (
+            {checkoutStep === 'cart' && cartLines.length > 0 && (
               <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
                 {cartError && (
                   <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
@@ -4138,10 +4437,10 @@ export default function App() {
                 </p>
                 <button
                   type="button"
-                  onClick={handleBookCart}
+                  onClick={() => setCheckoutStep('details')}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
                 >
-                  {isB2B ? 'Забронировать всё в WhatsApp' : 'Оформить заказ в WhatsApp'}
+                  Продолжить оформление
                 </button>
               </div>
             )}
@@ -4186,148 +4485,19 @@ export default function App() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-
-            <div className="grid gap-4 p-5 sm:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Имя клиента</span>
-                <input
-                  type="text"
-                  value={checkoutForm.name}
-                  onChange={(e) => updateCheckoutField('name', e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                  placeholder="Иван"
-                />
-                {checkoutErrors.name && (
-                  <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.name}</p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Номер телефона</span>
-                <input
-                  type="tel"
-                  value={checkoutForm.phone}
-                  onChange={(e) => updateCheckoutField('phone', e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                  placeholder="+7 777 123 45 67"
-                />
-                {checkoutErrors.phone && (
-                  <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.phone}</p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
-                <select
-                  value={checkoutForm.customerType}
-                  onChange={(e) =>
-                    updateCheckoutField('customerType', e.target.value as CheckoutForm['customerType'])
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                >
-                  <option value="" disabled>Выберите тип клиента</option>
-                  <option value="retail">Розница</option>
-                  <option value="wholesale">Оптовик</option>
-                  <option value="shop">Магазин</option>
-                  <option value="cafe">Кафе</option>
-                </select>
-                {checkoutErrors.customerType && (
-                  <p className="mt-1 text-xs font-medium text-red-600">
-                    {checkoutErrors.customerType}
-                  </p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Тип заказа</span>
-                <select
-                  value={checkoutForm.orderType}
-                  onChange={(e) =>
-                    updateCheckoutField('orderType', e.target.value as CheckoutForm['orderType'])
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                >
-                  <option value="" disabled>Выберите тип заказа</option>
-                  <option value="retail">Розничный</option>
-                  <option value="wholesale">Оптовый</option>
-                </select>
-                {checkoutErrors.orderType && (
-                  <p className="mt-1 text-xs font-medium text-red-600">
-                    {checkoutErrors.orderType}
-                  </p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Получение</span>
-                <select
-                  value={checkoutForm.fulfillment}
-                  onChange={(e) =>
-                    updateCheckoutField('fulfillment', e.target.value as CheckoutForm['fulfillment'])
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                >
-                  <option value="" disabled>Выберите способ получения</option>
-                  <option value="pickup">Самовывоз</option>
-                  <option value="delivery">Доставка</option>
-                </select>
-                {checkoutErrors.fulfillment && (
-                  <p className="mt-1 text-xs font-medium text-red-600">
-                    {checkoutErrors.fulfillment}
-                  </p>
-                )}
-              </label>
-
-              {checkoutForm.fulfillment === 'delivery' && (
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">Адрес доставки</span>
-                  <input
-                    type="text"
-                    value={checkoutForm.address}
-                    onChange={(e) => updateCheckoutField('address', e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                    placeholder="Уральск, ул. Абая 10"
-                  />
-                  {checkoutErrors.address && (
-                    <p className="mt-1 text-xs font-medium text-red-600">
-                      {checkoutErrors.address}
-                    </p>
-                  )}
-                </label>
-              )}
-
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Комментарий</span>
-                <textarea
-                  value={checkoutForm.comment}
-                  onChange={(e) => updateCheckoutField('comment', e.target.value)}
-                  rows={3}
-                  className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-                  placeholder="Доставить после 18:00"
-                />
-              </label>
-            </div>
-
-            <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
-              {checkoutSubmitError && (
-                <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-                  {checkoutSubmitError}
-                </div>
-              )}
-              <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
-                <span className="text-sm font-semibold text-slate-700">К оплате</span>
-                <span className="text-lg font-bold tabular-nums text-brand-800">
-                  {formatCurrency(cartGrandTotal)}
-                </span>
-              </div>
-              <button
-                type="submit"
-                disabled={isSubmittingOrder}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d] disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
-              >
-                {isSubmittingOrder ? 'Сохраняем заказ...' : 'Отправить в WhatsApp'}
-              </button>
-            </div>
+            <CheckoutFormContent
+              checkoutStep={checkoutStep}
+              checkoutForm={checkoutForm}
+              checkoutErrors={checkoutErrors}
+              checkoutSubmitError={checkoutSubmitError}
+              checkoutSuccessMessage={checkoutSuccessMessage}
+              isSubmittingOrder={isSubmittingOrder}
+              cartCount={cartCount}
+              cartGrandTotal={cartGrandTotal}
+              isB2B={isB2B}
+              cartLines={cartLines}
+              updateCheckoutField={updateCheckoutField}
+            />
           </form>
         </div>
       )}
