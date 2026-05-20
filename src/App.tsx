@@ -77,7 +77,6 @@ interface CheckoutForm {
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
-const RETAIL_MIN_ORDER_KG = 5
 
 const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
   retail: 'Розница',
@@ -95,6 +94,9 @@ const FULFILLMENT_LABELS: Record<FulfillmentType, string> = {
   pickup: 'Самовывоз',
   delivery: 'Доставка',
 }
+
+const RETAIL_QUICK_QUANTITIES = [1, 3, 5, 10, 25]
+const WHOLESALE_QUICK_QUANTITIES = [25, 50, 100, 500, 1000]
 
 const fallbackProducts: Product[] = [
   {
@@ -285,34 +287,70 @@ function getWeightKg(_product: Product, volume: number, _isB2B = true): number {
   return volume
 }
 
-function getProductDisplayConfig(product: Product, isB2B: boolean) {
-  const minOrder = Math.max(1, product.min_order ?? product.sliderMin ?? 1)
+function getAvailableStockKg(product: Product): number {
+  return Math.max(0, product.stock_amount ?? product.retailStockKg ?? 0)
+}
 
-  if (isB2B) {
-    const sliderMax = Math.max(minOrder * 10, minOrder + 100)
+function formatStockAmount(value: number): string {
+  if (value >= 1000) {
+    const tons = value / 1000
+    return `${Number.isInteger(tons) ? tons : tons.toFixed(1)} т`
+  }
 
+  return `${formatMoney(value)} кг`
+}
+
+function getStockDisplay(product: Product) {
+  const stock = getAvailableStockKg(product)
+
+  if (stock <= 0) {
     return {
-      unitMode: 'kg' as const,
-      sliderMin: minOrder,
-      sliderMax,
-      sliderStep: 1,
-      defaultVolume: minOrder,
+      stock,
+      label: 'Нет в наличии',
+      className: 'border-red-200 bg-red-50 text-red-700',
     }
   }
 
-  const sliderMax = Math.max(10, minOrder)
+  if (stock <= 50) {
+    return {
+      stock,
+      label: `Осталось мало: ${formatStockAmount(stock)}`,
+      className: 'border-amber-200 bg-amber-50 text-amber-800',
+    }
+  }
 
   return {
-    unitMode: 'kg' as const,
-    sliderMin: 1,
-    sliderMax,
-    sliderStep: 1,
-    defaultVolume: Math.min(5, sliderMax),
+    stock,
+    label: `Доступно: ${formatStockAmount(stock)}`,
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   }
 }
 
-function getVolumeUnit(_product: Product, _isB2B = true): string {
-  return 'кг'
+function getProductDisplayConfig(product: Product, isB2B: boolean) {
+  const minOrder = Math.max(1, product.min_order ?? product.sliderMin ?? 1)
+  const stock = getAvailableStockKg(product)
+
+  if (isB2B) {
+    const sliderMax = stock
+
+    return {
+      unitMode: 'kg' as const,
+      sliderMin: stock > 0 ? Math.min(minOrder, stock) : minOrder,
+      sliderMax,
+      sliderStep: 1,
+      defaultVolume: stock > 0 ? Math.min(minOrder, stock) : 0,
+    }
+  }
+
+  const sliderMax = stock
+
+  return {
+    unitMode: 'kg' as const,
+    sliderMin: stock > 0 ? 1 : 0,
+    sliderMax,
+    sliderStep: 1,
+    defaultVolume: stock > 0 ? Math.min(5, sliderMax) : 0,
+  }
 }
 
 function snapVolume(value: number, product: Product, isB2B = true): number {
@@ -340,6 +378,15 @@ function formatVolumeWhatsApp(_product: Product, volume: number, isB2B = true): 
   return formatQuantityWhatsApp(volume, isB2B)
 }
 
+function formatQuickQuantityLabel(value: number): string {
+  if (value >= 1000) {
+    const tons = value / 1000
+    return `${Number.isInteger(tons) ? tons : tons.toFixed(1)} т`
+  }
+
+  return `${formatMoney(value)} кг`
+}
+
 function createCheckoutForm(isB2B: boolean): CheckoutForm {
   return {
     name: '',
@@ -354,11 +401,6 @@ function createCheckoutForm(isB2B: boolean): CheckoutForm {
 
 function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
   return `${formatMoney(volume)} кг`
-}
-
-function formatSliderLabel(value: number, unitMode: 'tons' | 'kg'): string {
-  const label = Number.isInteger(value) ? String(value) : value.toFixed(1)
-  return `${label} ${unitMode === 'tons' ? 'т' : 'кг'}`
 }
 
 function calcPricing(product: Product, volume: number, isB2B = true) {
@@ -482,104 +524,117 @@ const statusToneClass: Record<Product['statusTone'], string> = {
   transit: 'bg-sky-50 text-sky-900 border-sky-200',
 }
 
-interface RetailQuantityInputProps {
+interface QuantitySelectorProps {
+  product: Product
   value: number
-  stock: number
-  min?: number
-  productName: string
+  isB2B: boolean
   onChange: (value: number) => void
 }
 
-function normalizeRetailQuantity(value: number, min: number, stock: number): number {
-  if (!Number.isFinite(value)) return Math.min(min, stock)
-  const rounded = Math.round(value)
-  return Math.min(stock, Math.max(min, rounded))
-}
-
-function RetailQuantityInput({
-  value,
-  stock,
-  min = RETAIL_MIN_ORDER_KG,
-  productName,
-  onChange,
-}: RetailQuantityInputProps) {
-  const [draft, setDraft] = useState(String(value))
-  const maxStock = Math.max(0, Math.floor(stock))
-  const canDecrease = value > min
-  const canIncrease = value < maxStock
-
-  useEffect(() => {
-    setDraft(String(value))
-  }, [value])
+function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorProps) {
+  const cfg = getProductDisplayConfig(product, isB2B)
+  const stockDisplay = getStockDisplay(product)
+  const currentQuantity = value
+  const minQuantity = cfg.sliderMin
+  const maxQuantity = cfg.sliderMax
+  const quickQuantities = (isB2B ? WHOLESALE_QUICK_QUANTITIES : RETAIL_QUICK_QUANTITIES).filter(
+    (quantity) => quantity >= minQuantity && quantity <= maxQuantity,
+  )
+  const step = isB2B ? 25 : 1
+  const minHint = isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'
+  const isOutOfStock = stockDisplay.stock <= 0
+  const canDecrease = !isOutOfStock && currentQuantity > minQuantity
+  const canIncrease = !isOutOfStock && currentQuantity < maxQuantity
 
   const commitValue = (nextValue: number) => {
-    const normalized = normalizeRetailQuantity(nextValue, min, maxStock)
-    setDraft(String(normalized))
-    onChange(normalized)
-  }
-
-  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextDraft = event.target.value.replace(/[^\d]/g, '')
-
-    if (nextDraft === '') {
-      setDraft('')
-      return
-    }
-
-    const parsed = Number(nextDraft)
-    if (parsed > maxStock) {
-      commitValue(maxStock)
-      return
-    }
-
-    setDraft(nextDraft)
-    if (parsed >= min) {
-      onChange(parsed)
-    }
-  }
-
-  const handleBlur = () => {
-    if (draft === '') {
-      commitValue(min)
-      return
-    }
-
-    commitValue(Number(draft))
+    if (isOutOfStock) return
+    onChange(snapVolume(nextValue, product, isB2B))
   }
 
   return (
-    <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <button
-        type="button"
-        onClick={() => commitValue(value - 1)}
-        disabled={!canDecrease}
-        className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
-        aria-label={`Уменьшить вес ${productName} на 1 кг`}
-      >
-        <Minus className="h-5 w-5" aria-hidden />
-      </button>
-      <label className="flex min-w-0 items-center justify-center border-x border-slate-200 px-2">
-        <input
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          value={draft}
-          onChange={handleInputChange}
-          onBlur={handleBlur}
-          className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none"
-          aria-label={`Вес покупки в килограммах: ${productName}`}
-        />
-        <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
-      </label>
-      <button
-        type="button"
-        onClick={() => commitValue(value + 1)}
-        disabled={!canIncrease}
-        className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
-        aria-label={`Увеличить вес ${productName} на 1 кг`}
-      >
-        <Plus className="h-5 w-5" aria-hidden />
-      </button>
+    <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold text-slate-800">Количество</p>
+          <p className="mt-0.5 text-xs font-medium text-slate-500">{minHint}</p>
+          <p
+            className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${stockDisplay.className}`}
+          >
+            {stockDisplay.label}
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 shadow-sm">
+          шаг {step} кг
+        </span>
+      </div>
+
+      <div className="grid grid-cols-[2.75rem_1fr_2.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <button
+          type="button"
+          onClick={() => commitValue(currentQuantity - step)}
+          disabled={!canDecrease}
+          className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+          aria-label={`Уменьшить количество ${product.name}`}
+        >
+          <Minus className="h-5 w-5" aria-hidden />
+        </button>
+        <label className="flex min-w-0 items-center justify-center border-x border-slate-200 px-2">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={cfg.sliderMin}
+            max={cfg.sliderMax}
+            step={cfg.sliderStep}
+            value={currentQuantity}
+            disabled={isOutOfStock}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              const parsed = Number(e.target.value)
+              if (!Number.isNaN(parsed)) {
+                commitValue(parsed)
+              }
+            }}
+            onBlur={(e) => {
+              const parsed = Number(e.target.value)
+              commitValue(Number.isNaN(parsed) || e.target.value === '' ? cfg.sliderMin : parsed)
+            }}
+            className="w-full bg-transparent text-center text-lg font-bold tabular-nums text-emerald-800 outline-none disabled:text-slate-300"
+            aria-label={`Количество ${product.name} в килограммах`}
+          />
+          <span className="ml-1 text-sm font-semibold text-slate-500">кг</span>
+        </label>
+        <button
+          type="button"
+          onClick={() => commitValue(currentQuantity + step)}
+          disabled={!canIncrease}
+          className="flex h-12 items-center justify-center text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 active:scale-95"
+          aria-label={`Увеличить количество ${product.name}`}
+        >
+          <Plus className="h-5 w-5" aria-hidden />
+        </button>
+      </div>
+
+      {quickQuantities.length > 0 && (
+        <div className="mt-3 grid grid-cols-5 gap-1.5">
+          {quickQuantities.map((quantity) => {
+            const selected = currentQuantity === quantity
+            return (
+              <button
+                key={quantity}
+                type="button"
+                onClick={() => commitValue(quantity)}
+                aria-pressed={selected}
+                className={`min-h-9 rounded-lg border px-1.5 text-xs font-bold transition active:scale-[0.98] ${
+                  selected
+                    ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
+                }`}
+              >
+                {formatQuickQuantityLabel(quantity)}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -743,11 +798,22 @@ export default function App() {
   }
 
   const addToCart = (product: Product) => {
+    const stock = getAvailableStockKg(product)
+    if (stock <= 0) {
+      setCartError('Товара нет в наличии.')
+      return
+    }
+
     const selected = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
     setCartError(null)
     setCart((prev) => {
       const current = prev[product.id] ?? 0
-      const nextVolume = current > 0 ? current + selected : selected
+      if (current >= stock) {
+        setCartError(`В корзине уже выбран весь доступный остаток: ${formatStockAmount(stock)}.`)
+        return prev
+      }
+
+      const nextVolume = Math.min(stock, current > 0 ? current + selected : selected)
       return {
         ...prev,
         [product.id]: snapVolume(nextVolume, product, isB2B),
@@ -1123,9 +1189,10 @@ export default function App() {
           const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
           const { discount, pricePerKg, total } = calcPricing(product, volume, isB2B)
           const hasDiscount = discount > 0
-          const unit = getVolumeUnit(product, isB2B)
           const inCart = product.id in cart
           const justAdded = addedProductId === product.id
+          const stockDisplay = getStockDisplay(product)
+          const isOutOfStock = stockDisplay.stock <= 0
           const analyticsActionClass = 'bg-white text-emerald-700'
           const productTitle = product.image ? null : (
             <div className="px-5 pt-5">
@@ -1286,96 +1353,13 @@ export default function App() {
 
                 <hr className="border-gray-100" />
 
-                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
-                  {isB2B ? (
-                    <>
-                      <div className="mb-3 flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-700">Объём закупки</span>
-                        <div className="flex items-center gap-1.5">
-                          {(() => {
-                            const cfg = getProductDisplayConfig(product, true)
-                            return (
-                              <>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min={cfg.sliderMin}
-                                  max={cfg.sliderMax}
-                                  step={cfg.sliderStep}
-                                  value={volume}
-                                  onChange={(e) => {
-                                    const parsed = Number(e.target.value)
-                                    if (!Number.isNaN(parsed)) {
-                                      setProductVolume(product, parsed)
-                                    }
-                                  }}
-                                  onBlur={(e) => {
-                                    const parsed = Number(e.target.value)
-                                    if (Number.isNaN(parsed) || e.target.value === '') {
-                                      setProductVolume(product, cfg.sliderMin)
-                                    } else {
-                                      setProductVolume(product, parsed)
-                                    }
-                                  }}
-                                  className="w-[4.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-right text-sm font-bold tabular-nums text-emerald-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
-                                  aria-label={`Объём закупки в ${unit}`}
-                                />
-                                <span className="text-sm font-semibold text-slate-500">{unit}</span>
-                              </>
-                            )
-                          })()}
-                        </div>
-                      </div>
-                      {(() => {
-                        const cfg = getProductDisplayConfig(product, true)
-                        return (
-                          <>
-                            <input
-                              type="range"
-                              min={cfg.sliderMin}
-                              max={cfg.sliderMax}
-                              step={cfg.sliderStep}
-                              value={volume}
-                              onChange={(e) => setProductVolume(product, Number(e.target.value))}
-                              className="w-full accent-emerald-600"
-                              aria-label={`Ползунок объёма: ${product.name}`}
-                            />
-                            <div className="mt-1 flex justify-between text-[11px] text-slate-400">
-                              <span>{formatSliderLabel(cfg.sliderMin, cfg.unitMode)}</span>
-                              <span className="text-slate-500">
-                                {formatSliderLabel((cfg.sliderMin + cfg.sliderMax) / 2, cfg.unitMode)}
-                              </span>
-                              <span>{formatSliderLabel(cfg.sliderMax, cfg.unitMode)}</span>
-                            </div>
-                          </>
-                        )
-                      })()}
-                    </>
-                  ) : (
-                    <>
-                      <div className="mb-3 flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-700">Вес покупки</span>
-                        <span className="text-xs font-semibold text-slate-500">шаг 1 кг</span>
-                      </div>
-                      {(() => {
-                        const cfg = getProductDisplayConfig(product, false)
-                        return (
-                          <RetailQuantityInput
-                            value={volume}
-                            min={cfg.sliderMin}
-                            stock={cfg.sliderMax}
-                            productName={product.name}
-                            onChange={(nextVolume) => {
-                              setVolumes((prev) => ({
-                                ...prev,
-                                [product.id]: nextVolume,
-                              }))
-                            }}
-                          />
-                        )
-                      })()}
-                    </>
-                  )}
+                <div>
+                  <QuantitySelector
+                    product={product}
+                    value={volume}
+                    isB2B={isB2B}
+                    onChange={(nextVolume) => setProductVolume(product, nextVolume)}
+                  />
                   <p
                     className={`mt-4 text-center text-xl font-bold ${
                       hasDiscount ? 'text-emerald-700' : 'text-slate-800'
@@ -1394,8 +1378,11 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => addToCart(product)}
+                  disabled={isOutOfStock}
                   className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
-                    justAdded
+                    isOutOfStock
+                      ? 'cursor-not-allowed bg-slate-200 text-slate-500 shadow-none hover:shadow-md'
+                      : justAdded
                       ? 'bg-emerald-700 text-white shadow-emerald-700/20'
                       : inCart
                         ? 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
@@ -1403,7 +1390,18 @@ export default function App() {
                   }`}
                 >
                   <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
-                  {justAdded ? 'Добавлено!' : inCart ? 'Добавить ещё в корзину' : 'Добавить в корзину'}
+                  <span className="sm:hidden">
+                    {isOutOfStock
+                      ? 'Нет в наличии'
+                      : justAdded
+                        ? 'Добавлено!'
+                        : inCart
+                          ? 'Добавить ещё в корзину'
+                          : 'Добавить в корзину'}
+                  </span>
+                  <span className="hidden sm:inline">
+                    {isOutOfStock ? 'Нет в наличии' : justAdded ? 'Добавлено!' : inCart ? 'Добавить ещё' : 'В корзину'}
+                  </span>
                 </button>
               </div>
             </article>
