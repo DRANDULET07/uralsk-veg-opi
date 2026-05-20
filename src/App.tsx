@@ -26,6 +26,9 @@ const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
 type TabId = 'all' | 'warehouse' | 'transit'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
 type SortOption = 'default' | 'price-asc' | 'price-desc'
+type CustomerType = 'retail' | 'wholesale' | 'shop' | 'cafe'
+type OrderType = 'retail' | 'wholesale'
+type FulfillmentType = 'pickup' | 'delivery'
 type Cart = Record<string, number>
 
 interface CartLine {
@@ -61,10 +64,37 @@ interface MockOrder {
   statusTone: 'delivered' | 'transit'
 }
 
+interface CheckoutForm {
+  name: string
+  phone: string
+  customerType: CustomerType | ''
+  orderType: OrderType | ''
+  fulfillment: FulfillmentType | ''
+  address: string
+  comment: string
+}
+
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 5
+
+const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
+  retail: 'Розница',
+  wholesale: 'Оптовик',
+  shop: 'Магазин',
+  cafe: 'Кафе',
+}
+
+const ORDER_TYPE_LABELS: Record<OrderType, string> = {
+  retail: 'Розничный',
+  wholesale: 'Оптовый',
+}
+
+const FULFILLMENT_LABELS: Record<FulfillmentType, string> = {
+  pickup: 'Самовывоз',
+  delivery: 'Доставка',
+}
 
 const fallbackProducts: Product[] = [
   {
@@ -310,6 +340,18 @@ function formatVolumeWhatsApp(_product: Product, volume: number, isB2B = true): 
   return formatQuantityWhatsApp(volume, isB2B)
 }
 
+function createCheckoutForm(isB2B: boolean): CheckoutForm {
+  return {
+    name: '',
+    phone: '',
+    customerType: '',
+    orderType: isB2B ? 'wholesale' : 'retail',
+    fulfillment: '',
+    address: '',
+    comment: '',
+  }
+}
+
 function formatOrderVolume(_product: Product, volume: number, _isB2B = true): string {
   return `${formatMoney(volume)} кг`
 }
@@ -348,27 +390,50 @@ function getCartLines(cart: Cart, products: Product[], isB2B: boolean): CartLine
     .filter((line): line is CartLine => line !== null)
 }
 
-function buildCartWhatsAppMessage(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
+function buildCartWhatsAppMessage(
+  lines: CartLine[],
+  grandTotal: number,
+  isB2B: boolean,
+  checkout?: CheckoutForm,
+): string {
   const itemLines = lines.map((line) => {
     const quantity = formatVolumeWhatsApp(line.product, line.volume, isB2B)
-    return `- ${line.product.name}: ${quantity} (Итого: ${formatCurrency(line.total)})`
+    return `- ${line.product.name}: ${quantity}, итого ${formatCurrency(line.total)}`
   })
 
   const totalVolume = lines.reduce((sum, line) => sum + line.volume, 0)
   const volumeLabel = formatQuantityWhatsApp(totalVolume, isB2B)
+  const details = checkout
+    ? [
+        `Имя: ${checkout.name.trim()}`,
+        `Телефон: ${checkout.phone.trim()}`,
+        `Тип клиента: ${CUSTOMER_TYPE_LABELS[checkout.customerType as CustomerType]}`,
+        `Тип заказа: ${ORDER_TYPE_LABELS[checkout.orderType as OrderType]}`,
+        `Получение: ${FULFILLMENT_LABELS[checkout.fulfillment as FulfillmentType]}`,
+        checkout.fulfillment === 'delivery' ? `Адрес: ${checkout.address.trim()}` : null,
+        checkout.comment.trim() ? `Комментарий: ${checkout.comment.trim()}` : null,
+      ].filter((line): line is string => Boolean(line))
+    : ['Мой номер в системе: не указан']
 
   return [
     'Здравствуйте! Хочу забронировать овощи:',
     '',
     ...itemLines,
     '',
-    `Всего: ${volumeLabel} на общую сумму ${formatCurrency(grandTotal)}.`,
-    'Мой номер в системе: не указан',
+    `Всего: ${volumeLabel}`,
+    `Общая сумма: ${formatCurrency(grandTotal)}`,
+    '',
+    ...details,
   ].join('\n')
 }
 
-function getCartWhatsAppUrl(lines: CartLine[], grandTotal: number, isB2B: boolean): string {
-  const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B)
+function getCartWhatsAppUrl(
+  lines: CartLine[],
+  grandTotal: number,
+  isB2B: boolean,
+  checkout?: CheckoutForm,
+): string {
+  const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B, checkout)
   return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
 }
 
@@ -556,7 +621,11 @@ export default function App() {
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
   const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
   const [cart, setCart] = useState<Cart>({})
-  const [orderName] = useState('')
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [checkoutForm, setCheckoutForm] = useState<CheckoutForm>(() =>
+    createCheckoutForm(true),
+  )
+  const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({})
   const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
   const [showMyOrders, setShowMyOrders] = useState(false)
@@ -717,6 +786,8 @@ export default function App() {
   const clearCart = () => {
     setCartError(null)
     setCart({})
+    setCheckoutOpen(false)
+    setCheckoutErrors({})
   }
 
   const saveOrderToStorage = (order: SavedOrder) => {
@@ -727,14 +798,68 @@ export default function App() {
     localStorage.setItem(LOCAL_STORAGE_HISTORY, JSON.stringify(updatedHistory))
   }
 
-  const handleBookCart = () => {
-    if (cartLines.length === 0) return
-    setCartError(null)
+  const updateCheckoutField = <Field extends keyof CheckoutForm>(
+    field: Field,
+    value: CheckoutForm[Field],
+  ) => {
+    setCheckoutForm((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(field === 'fulfillment' && value === 'pickup' ? { address: '' } : {}),
+    }))
+    setCheckoutErrors((prev) => {
+      const next = { ...prev }
+      delete next[field]
+      if (field === 'fulfillment') delete next.address
+      return next
+    })
+  }
 
-    const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)
+  const validateCheckoutForm = () => {
+    const nextErrors: Partial<Record<keyof CheckoutForm, string>> = {}
+
+    if (!checkoutForm.name.trim()) nextErrors.name = 'Укажите имя'
+    if (!checkoutForm.phone.trim()) nextErrors.phone = 'Укажите номер телефона'
+    if (!checkoutForm.customerType) nextErrors.customerType = 'Выберите тип клиента'
+    if (!checkoutForm.orderType) nextErrors.orderType = 'Выберите тип заказа'
+    if (!checkoutForm.fulfillment) nextErrors.fulfillment = 'Выберите способ получения'
+    if (checkoutForm.fulfillment === 'delivery' && !checkoutForm.address.trim()) {
+      nextErrors.address = 'Укажите адрес доставки'
+    }
+
+    setCheckoutErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
+
+  const handleBookCart = () => {
+    if (cartLines.length === 0) {
+      setCartError('Корзина пуста. Добавьте товары перед оформлением заказа.')
+      return
+    }
+
+    setCartError(null)
+    setCheckoutErrors({})
+    setCheckoutForm((prev) => ({
+      ...prev,
+      orderType: isB2B ? 'wholesale' : 'retail',
+    }))
+    setCheckoutOpen(true)
+  }
+
+  const handleSubmitCheckout = () => {
+    if (cartLines.length === 0) {
+      setCheckoutOpen(false)
+      setCartError('Корзина пуста. Добавьте товары перед оформлением заказа.')
+      return
+    }
+
+    if (!validateCheckoutForm()) return
+
+    setCartError(null)
+    const whatsappUrl = getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B, checkoutForm)
 
     const order: SavedOrder = {
-      userName: orderName.trim() || undefined,
+      userName: checkoutForm.name.trim() || undefined,
       createdAt: new Date().toISOString(),
       items: cartLines.map((line) => ({
         productId: line.product.id,
@@ -1529,6 +1654,180 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {checkoutOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-3 backdrop-blur-[2px] sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="checkout-modal-title"
+          onClick={() => setCheckoutOpen(false)}
+        >
+          <form
+            className="max-h-[min(92dvh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleSubmitCheckout()
+            }}
+          >
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white px-5 py-4">
+              <div>
+                <h3 id="checkout-modal-title" className="text-lg font-bold text-brand-900">
+                  Оформление заказа
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Заполните данные, и мы соберём сообщение для WhatsApp.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCheckoutOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                aria-label="Закрыть форму оформления"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-5 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Имя клиента</span>
+                <input
+                  type="text"
+                  value={checkoutForm.name}
+                  onChange={(e) => updateCheckoutField('name', e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                  placeholder="Иван"
+                />
+                {checkoutErrors.name && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.name}</p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Номер телефона</span>
+                <input
+                  type="tel"
+                  value={checkoutForm.phone}
+                  onChange={(e) => updateCheckoutField('phone', e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                  placeholder="+7 777 123 45 67"
+                />
+                {checkoutErrors.phone && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.phone}</p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
+                <select
+                  value={checkoutForm.customerType}
+                  onChange={(e) =>
+                    updateCheckoutField('customerType', e.target.value as CheckoutForm['customerType'])
+                  }
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                >
+                  <option value="" disabled>Выберите тип клиента</option>
+                  <option value="retail">Розница</option>
+                  <option value="wholesale">Оптовик</option>
+                  <option value="shop">Магазин</option>
+                  <option value="cafe">Кафе</option>
+                </select>
+                {checkoutErrors.customerType && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    {checkoutErrors.customerType}
+                  </p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Тип заказа</span>
+                <select
+                  value={checkoutForm.orderType}
+                  onChange={(e) =>
+                    updateCheckoutField('orderType', e.target.value as CheckoutForm['orderType'])
+                  }
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                >
+                  <option value="" disabled>Выберите тип заказа</option>
+                  <option value="retail">Розничный</option>
+                  <option value="wholesale">Оптовый</option>
+                </select>
+                {checkoutErrors.orderType && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    {checkoutErrors.orderType}
+                  </p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Получение</span>
+                <select
+                  value={checkoutForm.fulfillment}
+                  onChange={(e) =>
+                    updateCheckoutField('fulfillment', e.target.value as CheckoutForm['fulfillment'])
+                  }
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                >
+                  <option value="" disabled>Выберите способ получения</option>
+                  <option value="pickup">Самовывоз</option>
+                  <option value="delivery">Доставка</option>
+                </select>
+                {checkoutErrors.fulfillment && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    {checkoutErrors.fulfillment}
+                  </p>
+                )}
+              </label>
+
+              {checkoutForm.fulfillment === 'delivery' && (
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Адрес доставки</span>
+                  <input
+                    type="text"
+                    value={checkoutForm.address}
+                    onChange={(e) => updateCheckoutField('address', e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                    placeholder="Уральск, ул. Абая 10"
+                  />
+                  {checkoutErrors.address && (
+                    <p className="mt-1 text-xs font-medium text-red-600">
+                      {checkoutErrors.address}
+                    </p>
+                  )}
+                </label>
+              )}
+
+              <label className="block sm:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">Комментарий</span>
+                <textarea
+                  value={checkoutForm.comment}
+                  onChange={(e) => updateCheckoutField('comment', e.target.value)}
+                  rows={3}
+                  className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                  placeholder="Доставить после 18:00"
+                />
+              </label>
+            </div>
+
+            <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                <span className="text-sm font-semibold text-slate-700">К оплате</span>
+                <span className="text-lg font-bold tabular-nums text-brand-800">
+                  {formatCurrency(cartGrandTotal)}
+                </span>
+              </div>
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
+              >
+                Отправить в WhatsApp
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
