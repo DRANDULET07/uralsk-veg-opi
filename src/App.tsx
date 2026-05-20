@@ -798,6 +798,42 @@ function formatAdminDate(value: string): string {
   })
 }
 
+function getAdminStatusClass(status: AdminOrderStatus): string {
+  const classes: Record<AdminOrderStatus, string> = {
+    new: 'border-sky-200 bg-sky-50 text-sky-800',
+    processing: 'border-amber-200 bg-amber-50 text-amber-800',
+    completed: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    cancelled: 'border-slate-200 bg-slate-100 text-slate-600',
+  }
+
+  return classes[status]
+}
+
+function buildAdminOrderCopyText(order: AdminOrder): string {
+  const productLines = order.items.map(
+    (item) =>
+      `- ${item.product_name}: ${formatVolumeLabel({} as Product, item.quantity_kg)} x ${formatCurrency(item.price_per_kg)} = ${formatCurrency(item.total_amount)}`,
+  )
+
+  return [
+    'Заказ:',
+    `Клиент: ${order.customer_name || '-'}`,
+    `Телефон: ${formatPhoneForDisplay(normalizePhone(order.customer_phone))}`,
+    `Тип клиента: ${order.client_type || '-'}`,
+    `Тип заказа: ${order.order_type || '-'}`,
+    `Получение: ${order.receiving_type || '-'}`,
+    `Адрес: ${order.delivery_address ?? ''}`,
+    `Комментарий: ${order.comment ?? ''}`,
+    '',
+    'Товары:',
+    ...(productLines.length > 0 ? productLines : ['- Позиции заказа не найдены']),
+    '',
+    `Общий вес: ${formatVolumeLabel({} as Product, order.total_weight_kg)}`,
+    `Общая сумма: ${formatCurrency(order.total_amount)}`,
+    `Статус: ${ADMIN_STATUS_LABELS[order.status]}`,
+  ].join('\n')
+}
+
 function AdminPage() {
   const [password, setPassword] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(
@@ -808,7 +844,9 @@ function AdminPage() {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('all')
+  const [adminSearchQuery, setAdminSearchQuery] = useState('')
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+  const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
 
   const loadAdminOrders = async () => {
     setOrdersLoading(true)
@@ -878,14 +916,36 @@ function AdminPage() {
     }
   }, [isAuthenticated])
 
-  const filteredOrders = useMemo(
-    () =>
-      statusFilter === 'all'
-        ? orders
-        : orders.filter((order) => order.status === statusFilter),
-    [orders, statusFilter],
-  )
+  const filteredOrders = useMemo(() => {
+    const query = adminSearchQuery.trim().toLowerCase()
+
+    return orders.filter((order) => {
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter
+      if (!matchesStatus) return false
+      if (!query) return true
+
+      const haystack = [
+        order.customer_name,
+        order.customer_phone,
+        formatPhoneForDisplay(normalizePhone(order.customer_phone)),
+        order.delivery_address ?? '',
+        order.comment ?? '',
+        ...order.items.map((item) => item.product_name),
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return haystack.includes(query)
+    })
+  }, [adminSearchQuery, orders, statusFilter])
   const totalAmount = filteredOrders.reduce((sum, order) => sum + order.total_amount, 0)
+  const statusStats = filteredOrders.reduce(
+    (acc, order) => {
+      acc[order.status] += 1
+      return acc
+    },
+    { new: 0, processing: 0, completed: 0, cancelled: 0 } as Record<AdminOrderStatus, number>,
+  )
 
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -914,6 +974,16 @@ function AdminPage() {
       setOrdersError(getErrorMessage(error))
     } finally {
       setUpdatingOrderId(null)
+    }
+  }
+
+  const copyOrderToClipboard = async (order: AdminOrder) => {
+    try {
+      await navigator.clipboard.writeText(buildAdminOrderCopyText(order))
+      setCopiedOrderId(order.id)
+      window.setTimeout(() => setCopiedOrderId(null), 1600)
+    } catch (error) {
+      setOrdersError(`Не удалось скопировать заказ: ${getErrorMessage(error)}`)
     }
   }
 
@@ -961,37 +1031,75 @@ function AdminPage() {
   return (
     <div className="min-h-dvh bg-slate-100 px-4 py-6 lg:px-6">
       <div className="mx-auto w-full max-w-[1400px]">
-        <header className="mb-5 flex flex-col gap-4 rounded-3xl bg-brand-900 p-5 text-white shadow-xl shadow-slate-200/70 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
-              URALSK VEG OPI
-            </p>
-            <h1 className="mt-1 text-2xl font-bold">Админка заказов</h1>
-            <p className="mt-1 text-sm text-brand-100">
-              Заказов: {filteredOrders.length} · Сумма: {formatCurrency(totalAmount)}
-            </p>
+        <header className="mb-5 rounded-3xl bg-brand-900 p-5 text-white shadow-xl shadow-slate-200/70">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
+                URALSK VEG OPI
+              </p>
+              <h1 className="mt-1 text-2xl font-bold">Админка заказов</h1>
+              <p className="mt-1 text-sm text-brand-100">
+                Новые сверху · данные из Supabase
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[30rem]">
+              <label className="relative block sm:col-span-2">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60"
+                  aria-hidden
+                />
+                <input
+                  type="search"
+                  value={adminSearchQuery}
+                  onChange={(event) => setAdminSearchQuery(event.target.value)}
+                  placeholder="Поиск: имя, телефон, адрес, товар..."
+                  className="w-full rounded-xl border border-white/20 bg-white/10 py-2.5 pl-10 pr-3 text-sm font-semibold text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-white/30"
+                />
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
+                className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
+              >
+                {ADMIN_STATUS_OPTIONS.map((status) => (
+                  <option key={status.id} value={status.id}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={loadAdminOrders}
+                disabled={ordersLoading}
+                className="flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
+              >
+                <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
+                Обновить
+              </button>
+            </div>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
-              className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white outline-none focus:ring-2 focus:ring-white/30 [&_option]:text-slate-800"
-            >
-              {ADMIN_STATUS_OPTIONS.map((status) => (
-                <option key={status.id} value={status.id}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={loadAdminOrders}
-              disabled={ordersLoading}
-              className="flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
-            >
-              <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
-              Обновить
-            </button>
+
+          <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Всего заказов</p>
+              <p className="text-xl font-bold">{filteredOrders.length}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Новых</p>
+              <p className="text-xl font-bold">{statusStats.new}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">В работе</p>
+              <p className="text-xl font-bold">{statusStats.processing}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Выполненных</p>
+              <p className="text-xl font-bold">{statusStats.completed}</p>
+            </div>
+            <div className="rounded-2xl bg-white/10 px-4 py-3">
+              <p className="text-xs text-brand-100">Сумма</p>
+              <p className="text-xl font-bold">{formatCurrency(totalAmount)}</p>
+            </div>
           </div>
         </header>
 
@@ -1016,36 +1124,68 @@ function AdminPage() {
                 key={order.id}
                 className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70"
               >
-                <div className="border-b border-slate-100 p-5">
+                <div className="border-b border-slate-100 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         {formatAdminDate(order.created_at)}
                       </p>
-                      <h2 className="mt-1 text-xl font-bold text-slate-900">
-                        {order.customer_name || 'Без имени'}
-                      </h2>
-                      <p className="mt-1 text-sm font-medium text-slate-600">
-                        {formatPhoneForDisplay(normalizePhone(order.customer_phone))}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <h2 className="text-lg font-bold text-slate-900">
+                          {order.customer_name || 'Без имени'}
+                        </h2>
+                        <a
+                          href={`https://wa.me/${normalizePhone(order.customer_phone)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-bold text-brand-700 hover:underline"
+                        >
+                          {formatPhoneForDisplay(normalizePhone(order.customer_phone))}
+                        </a>
+                      </div>
                     </div>
-                    <select
-                      value={order.status}
-                      onChange={(event) =>
-                        void updateOrderStatus(order.id, event.target.value as AdminOrderStatus)
-                      }
-                      disabled={updatingOrderId === order.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 disabled:cursor-wait disabled:opacity-70"
-                    >
-                      {ADMIN_STATUS_OPTIONS.filter((status) => status.id !== 'all').map((status) => (
-                        <option key={status.id} value={status.id}>
-                          {status.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-bold ${getAdminStatusClass(order.status)}`}
+                      >
+                        {ADMIN_STATUS_LABELS[order.status]}
+                      </span>
+                      <select
+                        value={order.status}
+                        onChange={(event) =>
+                          void updateOrderStatus(order.id, event.target.value as AdminOrderStatus)
+                        }
+                        disabled={updatingOrderId === order.id}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {ADMIN_STATUS_OPTIONS.filter((status) => status.id !== 'all').map((status) => (
+                          <option key={status.id} value={status.id}>
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <a
+                      href={`https://wa.me/${normalizePhone(order.customer_phone)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-xl bg-[#25D366] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#1ebe5d]"
+                    >
+                      WhatsApp
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void copyOrderToClipboard(order)}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      {copiedOrderId === order.id ? 'Скопировано' : 'Скопировать заказ'}
+                    </button>
+                  </div>
+
+                  <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                     <div>
                       <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         Тип клиента
@@ -1064,14 +1204,6 @@ function AdminPage() {
                       </dt>
                       <dd className="font-semibold text-slate-800">
                         {order.receiving_type || '—'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        Статус
-                      </dt>
-                      <dd className="font-semibold text-slate-800">
-                        {ADMIN_STATUS_LABELS[order.status]}
                       </dd>
                     </div>
                     {order.delivery_address && (
@@ -1095,8 +1227,8 @@ function AdminPage() {
                   </dl>
                 </div>
 
-                <div className="p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         Общий вес
@@ -1115,7 +1247,7 @@ function AdminPage() {
                     </div>
                   </div>
 
-                  <h3 className="mb-3 text-sm font-bold text-slate-800">Товары заказа</h3>
+                  <h3 className="mb-2 text-sm font-bold text-slate-800">Товары заказа</h3>
                   {order.items.length === 0 ? (
                     <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
                       Позиции заказа не найдены.
@@ -1125,7 +1257,7 @@ function AdminPage() {
                       {order.items.map((item) => (
                         <li
                           key={item.id}
-                          className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
