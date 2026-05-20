@@ -36,6 +36,7 @@ type OrderType = 'retail' | 'wholesale'
 type FulfillmentType = 'pickup' | 'delivery'
 type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
 type AdminStatusFilter = AdminOrderStatus | 'all'
+type AdminTab = 'orders' | 'products'
 type AdminPeriodPreset =
   | 'today'
   | 'last7'
@@ -118,6 +119,30 @@ interface AdminOrder {
   items: AdminOrderItem[]
 }
 
+interface AdminProduct {
+  id: string
+  name: string
+  variant: string
+  category: string
+  retail_price: number
+  wholesale_price: number
+  stock_amount: number
+  unit: string
+  status: string
+  freshness: string
+  location: string
+  description: string
+  origin: string
+  in_stock: boolean
+  is_in_transit: boolean
+  delivery_eta: string
+  image_url: string
+  image?: string
+  is_active: boolean
+}
+
+type AdminProductForm = Omit<AdminProduct, 'id' | 'image'>
+
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
 const ADMIN_AUTH_STORAGE_KEY = 'adminAuthenticated'
@@ -168,6 +193,35 @@ const ADMIN_PERIOD_OPTIONS: { id: AdminPeriodPreset; label: string }[] = [
   { id: 'custom', label: 'Выбрать даты' },
   { id: 'all', label: 'Все время' },
 ]
+
+const ADMIN_TABS: { id: AdminTab; label: string }[] = [
+  { id: 'orders', label: 'Заказы' },
+  { id: 'products', label: 'Товары' },
+]
+
+const PRODUCT_IMAGE_BUCKET = 'product-images'
+const PRODUCT_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024
+const PRODUCT_IMAGE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+const emptyAdminProductForm: AdminProductForm = {
+  name: '',
+  variant: '',
+  category: '',
+  retail_price: 0,
+  wholesale_price: 0,
+  stock_amount: 0,
+  unit: 'кг',
+  status: '',
+  freshness: '',
+  location: '',
+  description: '',
+  origin: '',
+  in_stock: true,
+  is_in_transit: false,
+  delivery_eta: '',
+  image_url: '',
+  is_active: true,
+}
 
 const RETAIL_QUICK_QUANTITIES = [1, 3, 5, 10, 25]
 const WHOLESALE_QUICK_QUANTITIES = [25, 50, 100, 500, 1000]
@@ -903,6 +957,117 @@ function getAdminStatusClass(status: AdminOrderStatus): string {
   return classes[status]
 }
 
+function toAdminProduct(row: Record<string, unknown>): AdminProduct {
+  return {
+    id: String(row.id ?? ''),
+    name: String(row.name ?? ''),
+    variant: typeof row.variant === 'string' ? row.variant : '',
+    category: typeof row.category === 'string' ? row.category : '',
+    retail_price: toNumber(row.retail_price),
+    wholesale_price: toNumber(row.wholesale_price),
+    stock_amount: toNumber(row.stock_amount),
+    unit: typeof row.unit === 'string' && row.unit.trim() ? row.unit : 'кг',
+    status: typeof row.status === 'string' ? row.status : '',
+    freshness: typeof row.freshness === 'string' ? row.freshness : '',
+    location: typeof row.location === 'string' ? row.location : '',
+    description: typeof row.description === 'string' ? row.description : '',
+    origin: typeof row.origin === 'string' ? row.origin : '',
+    in_stock: row.in_stock === true,
+    is_in_transit: row.is_in_transit === true,
+    delivery_eta: typeof row.delivery_eta === 'string' ? row.delivery_eta : '',
+    image_url: typeof row.image_url === 'string' ? row.image_url : '',
+    image: typeof row.image === 'string' ? row.image : '',
+    is_active: row.is_active !== false,
+  }
+}
+
+function adminProductToForm(product: AdminProduct): AdminProductForm {
+  return {
+    name: product.name,
+    variant: product.variant,
+    category: product.category,
+    retail_price: product.retail_price,
+    wholesale_price: product.wholesale_price,
+    stock_amount: product.stock_amount,
+    unit: product.unit,
+    status: product.status,
+    freshness: product.freshness,
+    location: product.location,
+    description: product.description,
+    origin: product.origin,
+    in_stock: product.in_stock,
+    is_in_transit: product.is_in_transit,
+    delivery_eta: product.delivery_eta,
+    image_url: product.image_url,
+    is_active: product.is_active,
+  }
+}
+
+function buildAdminProductPayload(form: AdminProductForm) {
+  return {
+    name: form.name.trim(),
+    variant: form.variant.trim() || null,
+    category: form.category.trim() || null,
+    retail_price: form.retail_price,
+    wholesale_price: form.wholesale_price,
+    stock_amount: form.stock_amount,
+    unit: form.unit.trim() || 'кг',
+    status: form.status.trim() || null,
+    freshness: form.freshness.trim() || null,
+    location: form.location.trim() || null,
+    description: form.description.trim() || null,
+    origin: form.origin.trim() || null,
+    in_stock: form.in_stock,
+    is_in_transit: form.is_in_transit,
+    delivery_eta: form.delivery_eta.trim() || null,
+    image_url: form.image_url.trim() || null,
+    is_active: form.is_active,
+  }
+}
+
+function ProductImage({
+  src,
+  alt,
+  className,
+  imgClassName = 'h-full w-full object-cover',
+  fallbackClassName = 'text-sm font-semibold text-slate-500',
+}: {
+  src?: string | null
+  alt: string
+  className: string
+  imgClassName?: string
+  fallbackClassName?: string
+}) {
+  const [failed, setFailed] = useState(false)
+  const hasImage = Boolean(src && !failed)
+
+  return (
+    <div className={className}>
+      {hasImage ? (
+        <img
+          src={src ?? ''}
+          alt={alt}
+          className={imgClassName}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div className={`flex h-full items-center justify-center px-6 text-center ${fallbackClassName}`}>
+          Фото товара скоро будет добавлено
+        </div>
+      )}
+    </div>
+  )
+}
+
+function getProductImageUploadPath(file: File, productId: string | null): string {
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const safeProductId = (productId ?? 'new-product').replace(/[^a-z0-9_-]/gi, '-')
+  const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
+  return `${safeProductId}/${uniqueName}`
+}
+
 function buildAdminOrderCopyText(order: AdminOrder): string {
   const productLines = order.items.map(
     (item) =>
@@ -928,12 +1093,572 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
   ].join('\n')
 }
 
+function AdminProductsPanel() {
+  const [products, setProducts] = useState<AdminProduct[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [onlyInStock, setOnlyInStock] = useState(false)
+  const [onlyTransit, setOnlyTransit] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<AdminProductForm>(emptyAdminProductForm)
+  const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [visibilityUpdatingId, setVisibilityUpdatingId] = useState<string | null>(null)
+
+  const resetProductForm = () => {
+    setForm(emptyAdminProductForm)
+    setEditingId(null)
+    setFormMode(null)
+  }
+
+  const loadProducts = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const { data, error: productsError } = await supabase
+        .from('products')
+        .select('*')
+        .order('name', { ascending: true })
+
+      if (productsError) throw productsError
+      setProducts((data ?? []).map((row) => toAdminProduct(row)))
+    } catch (loadError) {
+      setError(`Не удалось загрузить товары: ${getErrorMessage(loadError)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadProducts()
+  }, [])
+
+  const categories = useMemo(
+    () => Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort(),
+    [products],
+  )
+  const statuses = useMemo(
+    () => Array.from(new Set(products.map((product) => product.status).filter(Boolean))).sort(),
+    [products],
+  )
+
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLowerCase()
+
+    return products.filter((product) => {
+      if (categoryFilter !== 'all' && product.category !== categoryFilter) return false
+      if (statusFilter !== 'all' && product.status !== statusFilter) return false
+      if (onlyInStock && !product.in_stock) return false
+      if (onlyTransit && !product.is_in_transit) return false
+      if (!query) return true
+
+      return [
+        product.name,
+        product.variant,
+        product.category,
+        product.description,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query)
+    })
+  }, [categoryFilter, onlyInStock, onlyTransit, products, search, statusFilter])
+
+  const startCreate = () => {
+    setForm(emptyAdminProductForm)
+    setEditingId(null)
+    setFormMode('create')
+    setError(null)
+    setSuccess(null)
+  }
+
+  const startEdit = (product: AdminProduct) => {
+    setForm(adminProductToForm(product))
+    setEditingId(product.id)
+    setFormMode('edit')
+    setError(null)
+    setSuccess(null)
+  }
+
+  const updateForm = <K extends keyof AdminProductForm>(key: K, value: AdminProductForm[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const saveProduct = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      if (!form.name.trim()) {
+        setError('Введите название товара.')
+        return
+      }
+
+      console.log('Saving product form image_url:', form.image_url)
+      const payload = buildAdminProductPayload(form)
+
+      if (formMode === 'edit' && editingId) {
+        const { data, error: updateError } = await supabase
+          .from('products')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', editingId)
+          .select('*')
+
+        if (updateError) throw updateError
+        const updatedProduct = data?.[0] ? toAdminProduct(data[0]) : { id: editingId, image: '', ...form }
+        setProducts((prev) =>
+          prev.map((product) => (product.id === editingId ? updatedProduct : product)),
+        )
+        setSuccess('Товар сохранён.')
+      } else {
+        const { data, error: insertError } = await supabase
+          .from('products')
+          .insert(payload)
+          .select('*')
+
+        if (insertError) throw insertError
+        const createdProducts = (data ?? []).map((row) => toAdminProduct(row))
+        setProducts((prev) => [...createdProducts, ...prev])
+        setSuccess('Товар добавлен.')
+      }
+
+      resetProductForm()
+    } catch (saveError) {
+      setError(`Не удалось сохранить товар: ${getErrorMessage(saveError)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const uploadProductImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setUploadingPhoto(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      if (!PRODUCT_IMAGE_ALLOWED_TYPES.includes(file.type)) {
+        setError('Фото должно быть в формате JPG, PNG или WebP.')
+        return
+      }
+
+      if (file.size > PRODUCT_IMAGE_MAX_SIZE_BYTES) {
+        setError('Фото слишком большое. Максимальный размер для админки: 5 MB.')
+        return
+      }
+
+      const path = getProductImageUploadPath(file, editingId)
+      const { error: uploadError } = await supabase.storage
+        .from(PRODUCT_IMAGE_BUCKET)
+        .upload(path, file, {
+          cacheControl: '3600',
+          contentType: file.type,
+          upsert: false,
+        })
+
+      if (uploadError) throw uploadError
+
+      const { data: publicUrlData } = supabase.storage
+        .from(PRODUCT_IMAGE_BUCKET)
+        .getPublicUrl(path)
+      const publicUrl = publicUrlData.publicUrl
+      console.log('Uploaded product image URL:', publicUrl)
+      console.log('Current editing product id:', editingId)
+
+      if (editingId) {
+        const { error: imageUpdateError } = await supabase
+          .from('products')
+          .update({ image_url: publicUrl, updated_at: new Date().toISOString() })
+          .eq('id', editingId)
+
+        if (imageUpdateError) {
+          console.error('Failed to save image_url:', imageUpdateError)
+          setError(`Фото загружено, но ссылка не сохранилась: ${imageUpdateError.message}`)
+          return
+        }
+
+        const { data: checkedProduct, error: checkError } = await supabase
+          .from('products')
+          .select('id, image_url')
+          .eq('id', editingId)
+          .maybeSingle()
+
+        console.log('Checked product image_url after update:', checkedProduct, checkError)
+
+        if (checkError) {
+          setError(`Не удалось проверить image_url: ${checkError.message}`)
+          return
+        }
+
+        if (!checkedProduct?.image_url) {
+          setError(
+            'Фото загружено, но image_url не записался в Supabase. Проверь RLS policy для products update.',
+          )
+          return
+        }
+
+        setForm((prev) => ({
+          ...prev,
+          image_url: checkedProduct.image_url,
+        }))
+
+        setProducts((prev) =>
+          prev.map((product) =>
+            product.id === editingId
+              ? { ...product, image_url: checkedProduct.image_url }
+              : product,
+          ),
+        )
+        setSuccess('Фото загружено, image_url товара обновлён.')
+      } else {
+        setForm((prev) => ({
+          ...prev,
+          image_url: publicUrl,
+        }))
+        setSuccess('Фото загружено. Сохраните товар, чтобы записать image_url в каталог.')
+      }
+    } catch (uploadError) {
+      setError(`Не удалось загрузить фото: ${getErrorMessage(uploadError)}`)
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  const toggleProductActive = async (product: AdminProduct) => {
+    setVisibilityUpdatingId(product.id)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      const nextActive = !product.is_active
+      const { data, error: updateError } = await supabase
+        .from('products')
+        .update({ is_active: nextActive })
+        .eq('id', product.id)
+        .select('*')
+
+      if (updateError) throw updateError
+
+      const updatedProduct = data?.[0]
+        ? toAdminProduct(data[0])
+        : { ...product, is_active: nextActive }
+      setProducts((prev) =>
+        prev.map((item) => (item.id === product.id ? updatedProduct : item)),
+      )
+      setSuccess(nextActive ? 'Товар показан на витрине.' : 'Товар скрыт с витрины.')
+    } catch (visibilityError) {
+      setError(`Не удалось изменить видимость товара: ${getErrorMessage(visibilityError)}`)
+    } finally {
+      setVisibilityUpdatingId(null)
+    }
+  }
+
+  const textInputClass =
+    'mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20'
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Товары</h2>
+            <p className="mt-1 text-sm text-slate-500">Каталог из Supabase · без физического удаления</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={loadProducts}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Обновить
+            </button>
+            <button
+              type="button"
+              onClick={startCreate}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-800"
+            >
+              <Plus className="h-4 w-4" />
+              Добавить товар
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(18rem,1fr)_12rem_12rem_9rem_8rem]">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Поиск по названию, варианту, категории, описанию..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+            />
+          </label>
+          <select
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+          >
+            <option value="all">Все категории</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+          >
+            <option value="all">Все статусы</option>
+            {statuses.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+            <input
+              type="checkbox"
+              checked={onlyInStock}
+              onChange={(event) => setOnlyInStock(event.target.checked)}
+              className="h-4 w-4 accent-brand-700"
+            />
+            В наличии
+          </label>
+          <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+            <input
+              type="checkbox"
+              checked={onlyTransit}
+              onChange={(event) => setOnlyTransit(event.target.checked)}
+              className="h-4 w-4 accent-brand-700"
+            />
+            В пути
+          </label>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+          {success}
+        </div>
+      )}
+
+      {formMode && (
+        <form onSubmit={saveProduct} className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h3 className="text-lg font-bold text-slate-900">
+              {formMode === 'create' ? 'Добавить товар' : 'Редактировать товар'}
+            </h3>
+            <button
+              type="button"
+              onClick={resetProductForm}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
+            >
+              Закрыть
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Название</span>
+              <input className={textInputClass} value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Вариант</span>
+              <input className={textInputClass} value={form.variant} onChange={(e) => updateForm('variant', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Категория</span>
+              <input className={textInputClass} value={form.category} onChange={(e) => updateForm('category', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Розничная цена</span>
+              <input type="number" className={textInputClass} value={form.retail_price} onChange={(e) => updateForm('retail_price', Number(e.target.value))} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Оптовая цена</span>
+              <input type="number" className={textInputClass} value={form.wholesale_price} onChange={(e) => updateForm('wholesale_price', Number(e.target.value))} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Остаток</span>
+              <input type="number" className={textInputClass} value={form.stock_amount} onChange={(e) => updateForm('stock_amount', Number(e.target.value))} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Единица</span>
+              <input className={textInputClass} value={form.unit} onChange={(e) => updateForm('unit', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Статус</span>
+              <input className={textInputClass} value={form.status} onChange={(e) => updateForm('status', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Свежесть</span>
+              <input className={textInputClass} value={form.freshness} onChange={(e) => updateForm('freshness', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Локация</span>
+              <input className={textInputClass} value={form.location} onChange={(e) => updateForm('location', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Origin</span>
+              <input className={textInputClass} value={form.origin} onChange={(e) => updateForm('origin', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Ожидаемая поставка</span>
+              <input className={textInputClass} value={form.delivery_eta} onChange={(e) => updateForm('delivery_eta', e.target.value)} />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-700">image_url</span>
+              <input className={textInputClass} value={form.image_url} onChange={(e) => updateForm('image_url', e.target.value)} />
+            </label>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2 xl:col-span-1">
+              <span className="text-sm font-semibold text-slate-700">Фото товара</span>
+              <label className="mt-2 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-sm font-bold text-brand-800 transition hover:bg-brand-50">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => void uploadProductImage(event)}
+                  disabled={uploadingPhoto}
+                  className="sr-only"
+                />
+                {uploadingPhoto ? 'Загружаем фото...' : 'Загрузить JPG/PNG/WebP'}
+              </label>
+              <p className="mt-2 text-xs text-slate-500">
+                Рекомендуемый размер до 5 MB. Старое фото не удаляется из Storage.
+              </p>
+              {form.image_url && (
+                <img
+                  src={form.image_url}
+                  alt="Превью товара"
+                  className="mt-3 h-28 w-full rounded-xl object-cover"
+                />
+              )}
+            </div>
+            <label className="block md:col-span-2 xl:col-span-3">
+              <span className="text-sm font-semibold text-slate-700">Описание</span>
+              <textarea className={`${textInputClass} min-h-24`} value={form.description} onChange={(e) => updateForm('description', e.target.value)} />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={form.in_stock} onChange={(e) => updateForm('in_stock', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+              В наличии
+            </label>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={form.is_in_transit} onChange={(e) => updateForm('is_in_transit', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+              В пути
+            </label>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={form.is_active} onChange={(e) => updateForm('is_active', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+              Показывать на витрине
+            </label>
+          </div>
+          <button
+            type="submit"
+            disabled={saving || uploadingPhoto}
+            className="mt-5 rounded-xl bg-brand-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70"
+          >
+            {saving ? 'Сохраняем...' : 'Сохранить'}
+          </button>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+          Загружаем товары...
+        </div>
+      ) : filteredProducts.length === 0 ? (
+        <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+          Товаров по выбранным фильтрам нет.
+        </div>
+      ) : (
+        <main className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredProducts.map((product) => {
+            const productImage = product.image_url || product.image
+
+            return (
+              <article key={product.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+                <ProductImage
+                  src={productImage}
+                  alt={product.name}
+                  className="h-40 bg-slate-100 sm:h-44"
+                  fallbackClassName="text-sm font-bold text-slate-400"
+                />
+                  <div className="p-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          {product.category || 'Без категории'}
+                        </p>
+                        <h3 className="mt-1 text-lg font-bold text-slate-900">{product.name}</h3>
+                        {product.variant && <p className="text-sm font-semibold text-slate-500">{product.variant}</p>}
+                      </div>
+                      <span className={`rounded-full border px-3 py-1 text-xs font-bold ${product.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
+                        {product.is_active ? 'Показан' : 'Скрыт'}
+                      </span>
+                    </div>
+                    <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Розница</dt><dd className="font-bold text-brand-800">{formatCurrency(product.retail_price)}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Опт</dt><dd className="font-bold text-brand-800">{formatCurrency(product.wholesale_price)}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Остаток</dt><dd className="font-semibold text-slate-800">{product.stock_amount} {product.unit}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Статус</dt><dd className="font-semibold text-slate-800">{product.status || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Свежесть</dt><dd className="font-semibold text-slate-800">{product.freshness || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Локация</dt><dd className="font-semibold text-slate-800">{product.location || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Наличие</dt><dd className="font-semibold text-slate-800">{product.in_stock ? 'В наличии' : 'Нет в наличии'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">В пути</dt><dd className="font-semibold text-slate-800">{product.is_in_transit ? 'Да' : 'Нет'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Поставка</dt><dd className="font-semibold text-slate-800">{product.delivery_eta || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Origin</dt><dd className="font-semibold text-slate-800">{product.origin || '-'}</dd></div>
+                    </dl>
+                    {product.description && <p className="mt-3 text-sm text-slate-600">{product.description}</p>}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => startEdit(product)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100">
+                        Редактировать
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void toggleProductActive(product)}
+                        disabled={visibilityUpdatingId === product.id}
+                        className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-100 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {product.is_active ? 'Скрыть товар' : 'Показать товар'}
+                      </button>
+                    </div>
+                  </div>
+              </article>
+            )
+          })}
+        </main>
+      )}
+    </section>
+  )
+}
+
 function AdminPage() {
   const [password, setPassword] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(
     () => sessionStorage.getItem(ADMIN_AUTH_STORAGE_KEY) === 'true',
   )
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('orders')
   const [orders, setOrders] = useState<AdminOrder[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState<string | null>(null)
@@ -1097,6 +1822,7 @@ function AdminPage() {
     sessionStorage.removeItem(LEGACY_ADMIN_AUTH_STORAGE_KEY)
     setIsAuthenticated(false)
     setPassword('')
+    setActiveAdminTab('orders')
     setOrders([])
     setOrdersError(null)
     setAdminSearchQuery('')
@@ -1288,6 +2014,25 @@ function AdminPage() {
   return (
     <div className="min-h-dvh bg-slate-100 px-4 py-6 lg:px-6">
       <div className="mx-auto w-full max-w-[1400px]">
+        <nav className="mb-4 flex flex-wrap gap-2 rounded-2xl bg-white p-2 shadow-lg shadow-slate-200/60">
+          {ADMIN_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveAdminTab(tab.id)}
+              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                activeAdminTab === tab.id
+                  ? 'bg-brand-700 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-brand-800'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {activeAdminTab === 'orders' ? (
+          <>
         <header className="mb-5 rounded-3xl bg-brand-900 p-4 text-white shadow-xl shadow-slate-200/70 sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -1637,6 +2382,10 @@ function AdminPage() {
               </article>
             ))}
           </main>
+        )}
+          </>
+        ) : (
+          <AdminProductsPanel />
         )}
       </div>
     </div>
@@ -2303,7 +3052,8 @@ export default function App() {
           const stockDisplay = getStockDisplay(product)
           const cannotOrderProduct = !canOrderProduct(product, isB2B)
           const analyticsActionClass = 'bg-white text-emerald-700'
-          const productTitle = product.image ? null : (
+          const productImage = product.image_url || product.image
+          const productTitle = productImage ? null : (
             <div className="px-5 pt-5">
               <p className="text-xs font-medium text-slate-500">{product.subtitle}</p>
               <h2 className="text-2xl font-bold text-slate-900">{product.name}</h2>
@@ -2317,30 +3067,21 @@ export default function App() {
             >
               <div
                 className={`group relative w-full overflow-hidden bg-slate-200 ${
-                  product.image ? 'h-48' : 'h-28'
+                  productImage ? 'h-48' : 'h-28'
                 }`}
               >
-                {product.image ? (
-                  <>
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      className="h-48 w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                  </>
-                ) : (
-                  <div className="flex h-full items-center justify-center bg-slate-50 px-8 text-center text-sm font-semibold text-slate-500">
-                    Фото товара скоро будет добавлено
-                  </div>
-                )}
-                <div className={product.image ? 'absolute bottom-4 left-4 right-4' : 'sr-only'}>
-                  <p className={`text-xs font-medium ${product.image ? 'text-white/90' : 'text-slate-600'}`}>
+                <ProductImage
+                  src={productImage}
+                  alt={product.name}
+                  className="h-full bg-slate-50"
+                  imgClassName="h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
+                />
+                {productImage && <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />}
+                <div className={productImage ? 'absolute bottom-4 left-4 right-4' : 'sr-only'}>
+                  <p className={`text-xs font-medium ${productImage ? 'text-white/90' : 'text-slate-600'}`}>
                     {product.subtitle}
                   </p>
-                  <h2 className={`text-2xl font-bold ${product.image ? 'text-white' : 'text-slate-900'}`}>
+                  <h2 className={`text-2xl font-bold ${productImage ? 'text-white' : 'text-slate-900'}`}>
                     {product.name}
                   </h2>
                 </div>

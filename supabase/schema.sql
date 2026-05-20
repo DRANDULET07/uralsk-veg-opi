@@ -33,6 +33,11 @@ CREATE POLICY "Allow public read access to products"
   FOR SELECT
   USING (true);
 
+ALTER TABLE IF EXISTS public.products
+  ADD COLUMN IF NOT EXISTS variant text,
+  ADD COLUMN IF NOT EXISTS image_url text,
+  ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+
 ALTER TABLE IF EXISTS public.orders
   ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 

@@ -5,8 +5,10 @@ export type ProductUnitMode = 'tons' | 'kg'
 export interface Product {
   id: string
   name: string
+  variant?: string | null
   category?: string | null
   image: string
+  image_url?: string | null
   wholesale_price?: number | null
   retail_price?: number | null
   unit?: string | null
@@ -20,6 +22,7 @@ export interface Product {
   stock_amount?: number | null
   is_in_transit?: boolean | null
   delivery_eta?: string | null
+  is_active?: boolean | null
   created_at?: string | null
   updated_at?: string | null
 
@@ -48,8 +51,10 @@ export type ProductUpdate = Partial<
   Pick<
     Product,
     | 'name'
+    | 'variant'
     | 'category'
     | 'image'
+    | 'image_url'
     | 'wholesale_price'
     | 'retail_price'
     | 'unit'
@@ -63,5 +68,6 @@ export type ProductUpdate = Partial<
     | 'stock_amount'
     | 'is_in_transit'
     | 'delivery_eta'
+    | 'is_active'
   >
 >

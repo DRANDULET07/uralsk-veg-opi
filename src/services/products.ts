@@ -65,15 +65,20 @@ function normalizeProduct(row: ProductRow, index: number): Product {
   const availability = isInTransit ? 'transit' : 'warehouse'
   const id = asString(row.id) ?? asString(row.slug) ?? String(index + 1)
   const name = asString(row.name) ?? 'Товар'
+  const variant = asString(row.variant)
   const category = asString(row.category)
   const description = asString(row.description)
   const location = asString(row.location) ?? 'Склад №1 (Уральск)'
 
+  const imageUrl = asString(row.image_url) ?? asString(row.image)
+
   return {
     id,
     name,
+    variant: variant ?? null,
     category,
-    image: asString(row.image) ?? asString(row.image_url) ?? '',
+    image: imageUrl ?? asString(row.image) ?? '',
+    image_url: imageUrl ?? null,
     wholesale_price: wholesalePrice,
     retail_price: retailPrice,
     unit,
@@ -87,10 +92,11 @@ function normalizeProduct(row: ProductRow, index: number): Product {
     stock_amount: stockAmount,
     is_in_transit: isInTransit,
     delivery_eta: asString(row.delivery_eta) ?? null,
+    is_active: asBoolean(row.is_active) ?? true,
     created_at: asString(row.created_at) ?? null,
     updated_at: asString(row.updated_at) ?? null,
 
-    subtitle: category ?? asString(row.origin) ?? 'Овощи',
+    subtitle: variant ?? category ?? asString(row.origin) ?? 'Овощи',
     statusEmoji: '',
     statusText: makeStatusText(row, isInTransit, inStock),
     statusTone,
@@ -146,6 +152,7 @@ export async function getProducts(): Promise<Product[]> {
   }
 
   return (data ?? [])
+    .filter((row) => row.is_active !== false)
     .map((row, index) => normalizeProduct(row, index))
     .sort((a, b) => {
       const byName = a.name.localeCompare(b.name, 'ru')
