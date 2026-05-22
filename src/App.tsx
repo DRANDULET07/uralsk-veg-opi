@@ -115,6 +115,7 @@ interface AdminOrder {
   total_weight_kg: number
   total_amount: number
   status: AdminOrderStatus
+  staff_note?: string | null
   archived_at?: string | null
   created_at: string
   items: AdminOrderItem[]
@@ -2072,6 +2073,9 @@ function AdminPage() {
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null)
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [editingStaffNoteOrderId, setEditingStaffNoteOrderId] = useState<string | null>(null)
+  const [staffNoteDraft, setStaffNoteDraft] = useState('')
+  const [savingStaffNoteOrderId, setSavingStaffNoteOrderId] = useState<string | null>(null)
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
   const [quickCalcPrice, setQuickCalcPrice] = useState('')
   const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
@@ -2134,6 +2138,7 @@ function AdminPage() {
           total_weight_kg: toNumber(order.total_weight_kg),
           total_amount: toNumber(order.total_amount),
           status: normalizeAdminStatus(order.status),
+          staff_note: typeof order.staff_note === 'string' ? order.staff_note : null,
           archived_at: typeof order.archived_at === 'string' ? order.archived_at : null,
           created_at: String(order.created_at ?? ''),
           items: itemsByOrder.get(String(order.id)) ?? [],
@@ -2570,6 +2575,44 @@ function AdminPage() {
       setOrdersError(`Не удалось удалить заказ навсегда: ${getErrorMessage(error)}`)
     } finally {
       setDeletingOrderId(null)
+    }
+  }
+
+  const startEditStaffNote = (order: AdminOrder) => {
+    setEditingStaffNoteOrderId(order.id)
+    setStaffNoteDraft(order.staff_note ?? '')
+    setOrdersError(null)
+  }
+
+  const cancelEditStaffNote = () => {
+    setEditingStaffNoteOrderId(null)
+    setStaffNoteDraft('')
+  }
+
+  const saveStaffNote = async (orderId: string) => {
+    setSavingStaffNoteOrderId(orderId)
+    setOrdersError(null)
+
+    try {
+      const nextNote = staffNoteDraft.trim() || null
+      const { error } = await supabase
+        .from('orders')
+        .update({ staff_note: nextNote })
+        .eq('id', orderId)
+
+      if (error) throw error
+
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId ? { ...order, staff_note: nextNote } : order,
+        ),
+      )
+      setEditingStaffNoteOrderId(null)
+      setStaffNoteDraft('')
+    } catch (error) {
+      setOrdersError(`Не удалось сохранить заметку работника: ${getErrorMessage(error)}`)
+    } finally {
+      setSavingStaffNoteOrderId(null)
     }
   }
 
@@ -3289,6 +3332,59 @@ function AdminPage() {
                       </div>
                     )}
                   </dl>
+                </div>
+
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <h3 className="text-sm font-bold text-slate-800">Заметка работника</h3>
+                      {editingStaffNoteOrderId !== order.id && (
+                        <button
+                          type="button"
+                          onClick={() => startEditStaffNote(order)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                        >
+                          {order.staff_note ? 'Редактировать заметку' : 'Добавить заметку'}
+                        </button>
+                      )}
+                    </div>
+
+                    {editingStaffNoteOrderId === order.id ? (
+                      <div className="mt-3 space-y-3">
+                        <textarea
+                          value={staffNoteDraft}
+                          onChange={(event) => setStaffNoteDraft(event.target.value)}
+                          rows={4}
+                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                          placeholder="Внутренняя заметка для работников"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void saveStaffNote(order.id)}
+                            disabled={savingStaffNoteOrderId === order.id}
+                            className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70"
+                          >
+                            {savingStaffNoteOrderId === order.id ? 'Сохраняем...' : 'Сохранить'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditStaffNote}
+                            disabled={savingStaffNoteOrderId === order.id}
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
+                          >
+                            Отмена
+                          </button>
+                        </div>
+                      </div>
+                    ) : order.staff_note ? (
+                      <p className="mt-3 whitespace-pre-wrap rounded-xl bg-white px-3 py-3 text-sm font-medium leading-relaxed text-slate-700">
+                        {order.staff_note}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-500">Заметки пока нет.</p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="p-4">
