@@ -160,7 +160,12 @@ interface AdminProduct {
   is_active: boolean
 }
 
-type AdminProductForm = Omit<AdminProduct, 'id' | 'image'>
+type NumericField = number | ''
+type AdminProductForm = Omit<AdminProduct, 'id' | 'image'> & {
+  retail_price: NumericField
+  wholesale_price: NumericField
+  stock_amount: NumericField
+}
 
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
@@ -1355,14 +1360,20 @@ function adminProductToForm(product: AdminProduct): AdminProductForm {
   }
 }
 
+function normalizeAdminProductNumber(value: number | string): number {
+  if (value === '' || value === null || value === undefined) return 0
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function buildAdminProductPayload(form: AdminProductForm) {
   return {
     name: form.name.trim(),
     variant: form.variant.trim() || null,
     category: form.category.trim() || null,
-    retail_price: form.retail_price,
-    wholesale_price: form.wholesale_price,
-    stock_amount: form.stock_amount,
+    retail_price: normalizeAdminProductNumber(form.retail_price),
+    wholesale_price: normalizeAdminProductNumber(form.wholesale_price),
+    stock_amount: normalizeAdminProductNumber(form.stock_amount),
     unit: form.unit.trim() || 'кг',
     status: form.status.trim() || null,
     freshness: form.freshness.trim() || null,
@@ -1944,6 +1955,25 @@ function AdminProductsPanel() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  type AdminProductNumericKey = 'retail_price' | 'wholesale_price' | 'stock_amount'
+
+  const clearZeroNumericField = (key: AdminProductNumericKey) => {
+    const value = form[key] as NumericField
+    if (value === 0) {
+      updateForm(key, '' as unknown as AdminProductForm[typeof key])
+    }
+  }
+
+  const restoreZeroNumericField = (key: AdminProductNumericKey) => {
+    if ((form[key] as NumericField) === '') {
+      updateForm(key, 0 as AdminProductForm[typeof key])
+    }
+  }
+
+  const updateNumericField = (key: AdminProductNumericKey, value: NumericField) => {
+    updateForm(key, value as AdminProductForm[typeof key])
+  }
+
   const saveProduct = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -2323,15 +2353,63 @@ function AdminProductsPanel() {
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">Розничная цена</span>
-                  <input type="number" className={textInputClass} value={form.retail_price} onChange={(e) => updateForm('retail_price', Number(e.target.value))} />
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min={0}
+                    step={1}
+                    className={textInputClass}
+                    value={form.retail_price}
+                    onFocus={() => clearZeroNumericField('retail_price')}
+                    onBlur={() => restoreZeroNumericField('retail_price')}
+                    onChange={(e) =>
+                      updateNumericField(
+                        'retail_price',
+                        e.target.value === '' ? '' : Number(e.target.value),
+                      )
+                    }
+                  />
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">Оптовая цена</span>
-                  <input type="number" className={textInputClass} value={form.wholesale_price} onChange={(e) => updateForm('wholesale_price', Number(e.target.value))} />
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min={0}
+                    step={1}
+                    className={textInputClass}
+                    value={form.wholesale_price}
+                    onFocus={() => clearZeroNumericField('wholesale_price')}
+                    onBlur={() => restoreZeroNumericField('wholesale_price')}
+                    onChange={(e) =>
+                      updateNumericField(
+                        'wholesale_price',
+                        e.target.value === '' ? '' : Number(e.target.value),
+                      )
+                    }
+                  />
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">Остаток</span>
-                  <input type="number" className={textInputClass} value={form.stock_amount} onChange={(e) => updateForm('stock_amount', Number(e.target.value))} />
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min={0}
+                    step={1}
+                    className={textInputClass}
+                    value={form.stock_amount}
+                    onFocus={() => clearZeroNumericField('stock_amount')}
+                    onBlur={() => restoreZeroNumericField('stock_amount')}
+                    onChange={(e) =>
+                      updateNumericField(
+                        'stock_amount',
+                        e.target.value === '' ? '' : Number(e.target.value),
+                      )
+                    }
+                  />
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">Единица</span>
