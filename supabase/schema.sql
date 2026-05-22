@@ -41,6 +41,9 @@ ALTER TABLE IF EXISTS public.products
 ALTER TABLE IF EXISTS public.orders
   ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 
+ALTER TABLE IF EXISTS public.clients
+  ADD COLUMN IF NOT EXISTS client_note text;
+
 INSERT INTO public.products (
   name,
   category,

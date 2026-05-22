@@ -36,7 +36,7 @@ type OrderType = 'retail' | 'wholesale'
 type FulfillmentType = 'pickup' | 'delivery'
 type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
 type AdminStatusFilter = AdminOrderStatus | 'all'
-type AdminTab = 'orders' | 'products'
+type AdminTab = 'orders' | 'products' | 'clients'
 type AdminReportStatusMode = AdminStatusFilter | 'active'
 type AdminPeriodPreset =
   | 'today'
@@ -119,6 +119,23 @@ interface AdminOrder {
   archived_at?: string | null
   created_at: string
   items: AdminOrderItem[]
+}
+
+interface AdminClient {
+  id: string
+  name: string
+  phone: string
+  client_type: string
+  client_note?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+interface AdminClientStats {
+  orderCount: number
+  totalAmount: number
+  averageAmount: number
+  lastOrderAt: string | null
 }
 
 interface AdminProduct {
@@ -215,6 +232,7 @@ const REPORT_STATUS_OPTIONS: { id: AdminReportStatusMode; label: string }[] = [
 const ADMIN_TABS: { id: AdminTab; label: string }[] = [
   { id: 'orders', label: 'Заказы' },
   { id: 'products', label: 'Товары' },
+  { id: 'clients', label: 'Клиенты' },
 ]
 
 const PRODUCT_IMAGE_BUCKET = 'product-images'
@@ -543,6 +561,24 @@ function formatQuickQuantityLabel(value: number): string {
 }
 
 function normalizePhone(value: string): string {
+  const digits = value.replace(/\D/g, '')
+
+  if (digits.length === 11 && digits.startsWith('8')) {
+    return `7${digits.slice(1)}`
+  }
+
+  if (digits.length === 11 && digits.startsWith('7')) {
+    return digits
+  }
+
+  if (digits.length === 10) {
+    return `7${digits}`
+  }
+
+  return digits
+}
+
+function normalizePhoneForSearch(value: string): string {
   const digits = value.replace(/\D/g, '')
 
   if (digits.length === 11 && digits.startsWith('8')) {
@@ -1185,6 +1221,27 @@ function getAdminStatusClass(status: AdminOrderStatus): string {
   return classes[status]
 }
 
+function getAdminClientStatus(stats: AdminClientStats): { label: string; className: string } {
+  if (stats.orderCount >= 10 || stats.totalAmount >= 100_000) {
+    return {
+      label: 'VIP клиент',
+      className: 'border-amber-200 bg-amber-50 text-amber-800',
+    }
+  }
+
+  if (stats.orderCount >= 3) {
+    return {
+      label: 'Постоянный клиент',
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    }
+  }
+
+  return {
+    label: 'Новый клиент',
+    className: 'border-sky-200 bg-sky-50 text-sky-800',
+  }
+}
+
 function toAdminProduct(row: Record<string, unknown>): AdminProduct {
   return {
     id: String(row.id ?? ''),
@@ -1319,6 +1376,395 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
     `Общая сумма: ${formatCurrency(order.total_amount)}`,
     `Статус: ${ADMIN_STATUS_LABELS[order.status]}`,
   ].join('\n')
+}
+
+function AdminClientsPanel() {
+  const [clients, setClients] = useState<AdminClient[]>([])
+  const [clientStats, setClientStats] = useState<Record<string, AdminClientStats>>({})
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [editingClientNoteId, setEditingClientNoteId] = useState<string | null>(null)
+  const [clientNoteDraft, setClientNoteDraft] = useState('')
+  const [savingClientNoteId, setSavingClientNoteId] = useState<string | null>(null)
+  const [deletingClientId, setDeletingClientId] = useState<string | null>(null)
+
+  const loadClients = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const { data: clientsData, error: clientsError } = await supabase
+        .from('clients')
+        .select('*')
+        .order('name', { ascending: true })
+
+      if (clientsError) throw clientsError
+
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('id, client_id, total_amount, created_at')
+
+      if (ordersError) throw ordersError
+
+      const nextStats: Record<string, AdminClientStats> = {}
+      ;((ordersData ?? []) as Record<string, unknown>[]).forEach((order) => {
+        if (!order.client_id) return
+        const clientId = String(order.client_id)
+        const current = nextStats[clientId] ?? {
+          orderCount: 0,
+          totalAmount: 0,
+          averageAmount: 0,
+          lastOrderAt: null,
+        }
+        const totalAmount = toNumber(order.total_amount)
+        const createdAt = typeof order.created_at === 'string' ? order.created_at : null
+        const currentLastTime = current.lastOrderAt ? new Date(current.lastOrderAt).getTime() : 0
+        const nextLastTime = createdAt ? new Date(createdAt).getTime() : 0
+
+        nextStats[clientId] = {
+          orderCount: current.orderCount + 1,
+          totalAmount: current.totalAmount + totalAmount,
+          averageAmount: 0,
+          lastOrderAt: nextLastTime > currentLastTime ? createdAt : current.lastOrderAt,
+        }
+      })
+
+      Object.keys(nextStats).forEach((clientId) => {
+        const stats = nextStats[clientId]
+        nextStats[clientId] = {
+          ...stats,
+          averageAmount: stats.orderCount > 0 ? stats.totalAmount / stats.orderCount : 0,
+        }
+      })
+
+      setClientStats(nextStats)
+      setClients(
+        ((clientsData ?? []) as Record<string, unknown>[]).map((client) => ({
+          id: String(client.id),
+          name: String(client.name ?? ''),
+          phone: String(client.phone ?? ''),
+          client_type: String(client.client_type ?? ''),
+          client_note: typeof client.client_note === 'string' ? client.client_note : null,
+          created_at: typeof client.created_at === 'string' ? client.created_at : null,
+          updated_at: typeof client.updated_at === 'string' ? client.updated_at : null,
+        })),
+      )
+    } catch (loadError) {
+      setError(`Не удалось загрузить клиентов: ${getErrorMessage(loadError)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadClients()
+  }, [])
+
+  const filteredClients = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    const searchDigits = search.replace(/\D/g, '')
+    const normalizedSearchPhone = normalizePhoneForSearch(search)
+    if (!query) return clients
+
+    return clients.filter((client) => {
+      const clientPhoneDigits = client.phone.replace(/\D/g, '')
+      const normalizedClientPhone = normalizePhoneForSearch(client.phone)
+      const textMatch = [
+        client.name,
+        client.phone,
+        formatPhoneForDisplay(normalizePhone(client.phone)),
+        client.client_type,
+        client.client_note ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query)
+      const phoneMatch =
+        searchDigits.length > 0 &&
+        (clientPhoneDigits.includes(searchDigits) ||
+          normalizedClientPhone.includes(normalizedSearchPhone) ||
+          normalizedSearchPhone.includes(normalizedClientPhone) ||
+          normalizedClientPhone.endsWith(searchDigits) ||
+          clientPhoneDigits.endsWith(searchDigits))
+
+      return textMatch || phoneMatch
+    })
+  }, [clients, search])
+
+  const startEditClientNote = (client: AdminClient) => {
+    setEditingClientNoteId(client.id)
+    setClientNoteDraft(client.client_note ?? '')
+    setError(null)
+  }
+
+  const cancelEditClientNote = () => {
+    setEditingClientNoteId(null)
+    setClientNoteDraft('')
+  }
+
+  const saveClientNote = async (clientId: string) => {
+    setSavingClientNoteId(clientId)
+    setError(null)
+
+    try {
+      const nextNote = clientNoteDraft.trim() || null
+      const { error: updateError } = await supabase
+        .from('clients')
+        .update({ client_note: nextNote })
+        .eq('id', clientId)
+
+      if (updateError) throw updateError
+
+      setClients((prev) =>
+        prev.map((client) =>
+          client.id === clientId ? { ...client, client_note: nextNote } : client,
+        ),
+      )
+      setEditingClientNoteId(null)
+      setClientNoteDraft('')
+    } catch (saveError) {
+      setError(`Не удалось сохранить заметку клиента: ${getErrorMessage(saveError)}`)
+    } finally {
+      setSavingClientNoteId(null)
+    }
+  }
+
+  const deleteClient = async (client: AdminClient) => {
+    const stats = clientStats[client.id] ?? {
+      orderCount: 0,
+      totalAmount: 0,
+      averageAmount: 0,
+      lastOrderAt: null,
+    }
+
+    if (stats.orderCount > 0) {
+      setError('Нельзя удалить клиента с заказами.')
+      return
+    }
+
+    const confirmed = window.confirm('Удалить клиента? Это действие нельзя отменить.')
+    if (!confirmed) return
+
+    setDeletingClientId(client.id)
+    setError(null)
+
+    try {
+      const { error: deleteError } = await supabase
+        .from('clients')
+        .delete()
+        .eq('id', client.id)
+
+      if (deleteError) throw deleteError
+
+      setClients((prev) => prev.filter((item) => item.id !== client.id))
+      setClientStats((prev) => {
+        const next = { ...prev }
+        delete next[client.id]
+        return next
+      })
+    } catch (deleteError) {
+      setError(`Не удалось удалить клиента: ${getErrorMessage(deleteError)}`)
+    } finally {
+      setDeletingClientId(null)
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-3xl bg-brand-900 p-4 text-white shadow-xl shadow-slate-200/70 sm:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
+              URALSK VEG OPI
+            </p>
+            <h1 className="mt-1 text-xl font-bold sm:text-2xl">Клиенты</h1>
+            <p className="mt-1 text-sm text-brand-100">
+              Статусы клиентов только для подсказки. Скидки и бонусы не применяются автоматически.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadClients()}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-wait disabled:opacity-70"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Обновить
+          </button>
+        </div>
+        <label className="relative mt-4 block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Поиск по имени, телефону, типу или заметке..."
+            className="h-11 w-full rounded-xl border border-white/20 bg-white/10 py-2 pl-10 pr-3 text-sm font-semibold text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-white/30"
+          />
+        </label>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+          Загружаем клиентов...
+        </div>
+      ) : filteredClients.length === 0 ? (
+        <div className="rounded-3xl bg-white p-8 text-center text-sm font-medium text-slate-500 shadow-lg shadow-slate-200/60">
+          Клиенты не найдены.
+        </div>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {filteredClients.map((client) => {
+            const stats = clientStats[client.id] ?? {
+              orderCount: 0,
+              totalAmount: 0,
+              averageAmount: 0,
+              lastOrderAt: null,
+            }
+            const status = getAdminClientStatus(stats)
+            const normalizedPhone = normalizePhone(client.phone)
+            const whatsappText = encodeURIComponent('Здравствуйте! Это URALSK VEG OPI по вашему заказу.')
+            const canDeleteClient = stats.orderCount === 0
+
+            return (
+              <article key={client.id} className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      {client.client_type || 'Клиент'}
+                    </p>
+                    <h2 className="mt-1 text-lg font-bold text-slate-900">
+                      {client.name || 'Без имени'}
+                    </h2>
+                    <a
+                      href={`https://wa.me/${normalizedPhone}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-block text-sm font-bold text-brand-700 hover:underline"
+                    >
+                      {formatPhoneForDisplay(normalizedPhone)}
+                    </a>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${status.className}`}>
+                      {status.label}
+                    </span>
+                    {canDeleteClient && (
+                      <span className="w-fit rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                        Нет заказов
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Заказов</dt>
+                    <dd className="font-bold text-slate-900">{stats.orderCount}</dd>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Общая сумма</dt>
+                    <dd className="font-bold text-brand-800">{formatCurrency(stats.totalAmount)}</dd>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Средний чек</dt>
+                    <dd className="font-bold text-slate-900">{formatCurrency(stats.averageAmount)}</dd>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Последний заказ</dt>
+                    <dd className="font-bold text-slate-900">
+                      {stats.lastOrderAt ? formatAdminDate(stats.lastOrderAt) : '-'}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-sm font-bold text-slate-800">Заметка работника</h3>
+                    {editingClientNoteId !== client.id && (
+                      <button
+                        type="button"
+                        onClick={() => startEditClientNote(client)}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        {client.client_note ? 'Редактировать заметку' : 'Добавить заметку'}
+                      </button>
+                    )}
+                  </div>
+
+                  {editingClientNoteId === client.id ? (
+                    <div className="mt-3 space-y-3">
+                      <textarea
+                        value={clientNoteDraft}
+                        onChange={(event) => setClientNoteDraft(event.target.value)}
+                        rows={4}
+                        className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                        placeholder="Например: часто берёт картофель"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveClientNote(client.id)}
+                          disabled={savingClientNoteId === client.id}
+                          className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70"
+                        >
+                          {savingClientNoteId === client.id ? 'Сохраняем...' : 'Сохранить'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEditClientNote}
+                          disabled={savingClientNoteId === client.id}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    </div>
+                  ) : client.client_note ? (
+                    <p className="mt-3 whitespace-pre-wrap rounded-xl bg-white px-3 py-3 text-sm font-medium leading-relaxed text-slate-700">
+                      {client.client_note}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-500">Заметки пока нет.</p>
+                  )}
+                </div>
+
+                <a
+                  href={`https://wa.me/${normalizedPhone}?text=${whatsappText}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-[#25D366] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#1ebe5d] sm:w-auto"
+                >
+                  WhatsApp
+                </a>
+                {canDeleteClient ? (
+                  <button
+                    type="button"
+                    onClick={() => void deleteClient(client)}
+                    disabled={deletingClientId === client.id}
+                    className="mt-2 inline-flex w-full items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-wait disabled:opacity-70 sm:ml-2 sm:mt-4 sm:w-auto"
+                  >
+                    {deletingClientId === client.id ? 'Удаляем...' : 'Удалить клиента'}
+                  </button>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-slate-500">
+                    Нельзя удалить клиента с заказами.
+                  </p>
+                )}
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function AdminProductsPanel() {
@@ -3463,8 +3909,10 @@ function AdminPage() {
           </main>
         )}
           </>
-        ) : (
+        ) : activeAdminTab === 'products' ? (
           <AdminProductsPanel />
+        ) : (
+          <AdminClientsPanel />
         )}
       </div>
     </div>
