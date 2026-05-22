@@ -1708,113 +1708,142 @@ function AdminProductsPanel() {
               Закрыть
             </button>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Название</span>
-              <input className={textInputClass} value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Вариант / сорт / фасовка</span>
-              <input className={textInputClass} value={form.variant} onChange={(e) => updateForm('variant', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Категория</span>
-              <input className={textInputClass} value={form.category} onChange={(e) => updateForm('category', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Розничная цена</span>
-              <input type="number" className={textInputClass} value={form.retail_price} onChange={(e) => updateForm('retail_price', Number(e.target.value))} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Оптовая цена</span>
-              <input type="number" className={textInputClass} value={form.wholesale_price} onChange={(e) => updateForm('wholesale_price', Number(e.target.value))} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Остаток</span>
-              <input type="number" className={textInputClass} value={form.stock_amount} onChange={(e) => updateForm('stock_amount', Number(e.target.value))} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Единица</span>
-              <input className={textInputClass} value={form.unit} onChange={(e) => updateForm('unit', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Статус</span>
-              <input className={textInputClass} value={form.status} onChange={(e) => updateForm('status', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Свежесть</span>
-              <input className={textInputClass} value={form.freshness} onChange={(e) => updateForm('freshness', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Локация</span>
-              <input className={textInputClass} value={form.location} onChange={(e) => updateForm('location', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Откуда товар</span>
-              <input className={textInputClass} value={form.origin} onChange={(e) => updateForm('origin', e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Ожидаемая поставка</span>
-              <input className={textInputClass} value={form.delivery_eta} onChange={(e) => updateForm('delivery_eta', e.target.value)} />
-              {form.is_in_transit && (
-                <p className="mt-1 text-xs font-medium text-slate-500">
-                  Этот текст увидит клиент в блоке Товар в пути.
-                </p>
-              )}
-            </label>
-            <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">Ссылка на фото</span>
-              <input className={textInputClass} value={form.image_url} onChange={(e) => updateForm('image_url', e.target.value)} />
-            </label>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2 xl:col-span-1">
-              <span className="text-sm font-semibold text-slate-700">Фото товара</span>
-              <label className="mt-2 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-sm font-bold text-brand-800 transition hover:bg-brand-50">
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(event) => void uploadProductImage(event)}
-                  disabled={uploadingPhoto}
-                  className="sr-only"
-                />
-                {uploadingPhoto ? 'Загружаем фото...' : 'Загрузить JPG/PNG/WebP'}
+          <div className="space-y-4">
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold text-slate-900">Основное</h4>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Название</span>
+                  <input className={textInputClass} value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Вариант / сорт / фасовка</span>
+                  <input className={textInputClass} value={form.variant} onChange={(e) => updateForm('variant', e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Категория</span>
+                  <input className={textInputClass} value={form.category} onChange={(e) => updateForm('category', e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Откуда товар</span>
+                  <input className={textInputClass} value={form.origin} onChange={(e) => updateForm('origin', e.target.value)} />
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold text-slate-900">Цены и остатки</h4>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Розничная цена</span>
+                  <input type="number" className={textInputClass} value={form.retail_price} onChange={(e) => updateForm('retail_price', Number(e.target.value))} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Оптовая цена</span>
+                  <input type="number" className={textInputClass} value={form.wholesale_price} onChange={(e) => updateForm('wholesale_price', Number(e.target.value))} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Остаток</span>
+                  <input type="number" className={textInputClass} value={form.stock_amount} onChange={(e) => updateForm('stock_amount', Number(e.target.value))} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Единица</span>
+                  <input className={textInputClass} value={form.unit} onChange={(e) => updateForm('unit', e.target.value)} />
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold text-slate-900">Статус и поставка</h4>
+              <div className="mt-3 grid gap-3">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+                    <input type="checkbox" checked={form.in_stock} onChange={(e) => updateForm('in_stock', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+                    В наличии
+                  </label>
+                  <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+                    <input type="checkbox" checked={form.is_in_transit} onChange={(e) => updateForm('is_in_transit', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+                    В пути
+                  </label>
+                  <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+                    <input type="checkbox" checked={form.is_active} onChange={(e) => updateForm('is_active', e.target.checked)} className="h-4 w-4 accent-brand-700" />
+                    Показывать на витрине
+                  </label>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Статус</span>
+                    <input className={textInputClass} value={form.status} onChange={(e) => updateForm('status', e.target.value)} />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Свежесть</span>
+                    <input className={textInputClass} value={form.freshness} onChange={(e) => updateForm('freshness', e.target.value)} />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Локация</span>
+                    <input className={textInputClass} value={form.location} onChange={(e) => updateForm('location', e.target.value)} />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Ожидаемая поставка</span>
+                    <input className={textInputClass} value={form.delivery_eta} onChange={(e) => updateForm('delivery_eta', e.target.value)} />
+                    {form.is_in_transit && (
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        Этот текст увидит клиент в блоке Товар в пути.
+                      </p>
+                    )}
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold text-slate-900">Фото</h4>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_260px]">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Ссылка на фото</span>
+                  <input className={textInputClass} value={form.image_url} onChange={(e) => updateForm('image_url', e.target.value)} />
+                </label>
+                <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <span className="text-sm font-semibold text-slate-700">Фото товара</span>
+                  <label className="mt-2 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-sm font-bold text-brand-800 transition hover:bg-brand-50">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => void uploadProductImage(event)}
+                      disabled={uploadingPhoto}
+                      className="sr-only"
+                    />
+                    {uploadingPhoto ? 'Загружаем фото...' : 'Загрузить JPG/PNG/WebP'}
+                  </label>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Рекомендуемый размер до 5 MB. Старое фото не удаляется из Storage.
+                  </p>
+                  {form.image_url && (
+                    <img
+                      src={form.image_url}
+                      alt="Превью товара"
+                      className="mt-3 h-32 w-full rounded-xl object-cover"
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold text-slate-900">Описание</h4>
+              <label className="mt-3 block">
+                <span className="text-sm font-semibold text-slate-700">Описание товара</span>
+                <textarea className={`${textInputClass} min-h-28`} value={form.description} onChange={(e) => updateForm('description', e.target.value)} />
               </label>
-              <p className="mt-2 text-xs text-slate-500">
-                Рекомендуемый размер до 5 MB. Старое фото не удаляется из Storage.
-              </p>
-              {form.image_url && (
-                <img
-                  src={form.image_url}
-                  alt="Превью товара"
-                  className="mt-3 h-28 w-full rounded-xl object-cover"
-                />
-              )}
-            </div>
-            <label className="block md:col-span-2 xl:col-span-3">
-              <span className="text-sm font-semibold text-slate-700">Описание</span>
-              <textarea className={`${textInputClass} min-h-24`} value={form.description} onChange={(e) => updateForm('description', e.target.value)} />
-            </label>
+              <button
+                type="submit"
+                disabled={saving || uploadingPhoto}
+                className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-base font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70 sm:w-auto sm:text-sm"
+              >
+                {saving ? 'Сохраняем...' : 'Сохранить'}
+              </button>
+            </section>
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
-              <input type="checkbox" checked={form.in_stock} onChange={(e) => updateForm('in_stock', e.target.checked)} className="h-4 w-4 accent-brand-700" />
-              В наличии
-            </label>
-            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
-              <input type="checkbox" checked={form.is_in_transit} onChange={(e) => updateForm('is_in_transit', e.target.checked)} className="h-4 w-4 accent-brand-700" />
-              В пути
-            </label>
-            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
-              <input type="checkbox" checked={form.is_active} onChange={(e) => updateForm('is_active', e.target.checked)} className="h-4 w-4 accent-brand-700" />
-              Показывать на витрине
-            </label>
-          </div>
-          <button
-            type="submit"
-            disabled={saving || uploadingPhoto}
-            className="mt-5 rounded-xl bg-brand-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70"
-          >
-            {saving ? 'Сохраняем...' : 'Сохранить'}
-          </button>
         </form>
       )}
 
