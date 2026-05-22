@@ -52,7 +52,7 @@ function makeMinOrder(row: ProductRow, minOrder: number, unit: string): string {
   return `Минимальный заказ от ${minOrder} ${unit}`
 }
 
-function normalizeProduct(row: ProductRow, index: number): Product {
+function normalizeProduct(row: ProductRow): Product {
   const unit = asString(row.unit) ?? 'кг'
   const unitMode = toUnitMode(unit)
   const wholesalePrice = asNumber(row.wholesale_price) ?? asNumber(row.basePrice) ?? asNumber(row.price) ?? 0
@@ -63,7 +63,10 @@ function normalizeProduct(row: ProductRow, index: number): Product {
   const isInTransit = asBoolean(row.is_in_transit) ?? false
   const statusTone = toStatusTone(row, isInTransit, inStock)
   const availability = isInTransit ? 'transit' : 'warehouse'
-  const id = asString(row.id) ?? asString(row.slug) ?? String(index + 1)
+  const id = String(row.id ?? '').trim()
+  if (!id) {
+    throw new Error('Product row from Supabase is missing id.')
+  }
   const name = asString(row.name) ?? 'Товар'
   const variant = asString(row.variant)
   const category = asString(row.category)
@@ -148,7 +151,7 @@ export async function getProducts(): Promise<Product[]> {
 
   return (data ?? [])
     .filter((row) => row.is_active !== false)
-    .map((row, index) => normalizeProduct(row, index))
+    .map((row) => normalizeProduct(row))
     .sort((a, b) => {
       const byName = a.name.localeCompare(b.name, 'ru')
       return byName !== 0 ? byName : a.id.localeCompare(b.id)
@@ -160,7 +163,7 @@ export async function getProductById(id: string): Promise<Product | null> {
   const { data, error } = await (isUuid(id) ? query.eq('id', id) : query.eq('id', id)).maybeSingle()
 
   if (error) handleProductsError('Не удалось загрузить товар из Supabase', error)
-  return data ? normalizeProduct(data, 0) : null
+  return data ? normalizeProduct(data) : null
 }
 
 export async function updateProduct(id: string, data: ProductUpdate): Promise<Product> {
@@ -172,5 +175,5 @@ export async function updateProduct(id: string, data: ProductUpdate): Promise<Pr
     .single()
 
   if (error) handleProductsError('Не удалось обновить товар в Supabase', error)
-  return normalizeProduct(updatedProduct, 0)
+  return normalizeProduct(updatedProduct)
 }

@@ -478,16 +478,6 @@ function canOrderProduct(product: Product, isB2B: boolean): boolean {
   return getAvailableStockKg(product) >= getMinimumOrderKg(isB2B)
 }
 
-function getProductOrderItemId(product: Product): number {
-  const productId = Number(product.id)
-
-  if (!Number.isInteger(productId) || productId <= 0) {
-    throw new Error(`У товара «${product.name}» некорректный ID для сохранения заказа.`)
-  }
-
-  return productId
-}
-
 function getProductDisplayConfig(product: Product, isB2B: boolean) {
   const minOrder = getMinimumOrderKg(isB2B)
   const stock = getAvailableStockKg(product)
@@ -2077,6 +2067,7 @@ function AdminPage() {
   const [adminSearchQuery, setAdminSearchQuery] = useState('')
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null)
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
   const [quickCalcPrice, setQuickCalcPrice] = useState('')
   const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
@@ -2511,6 +2502,70 @@ function AdminPage() {
       setOrdersError(`Не удалось восстановить заказ: ${getErrorMessage(error)}`)
     } finally {
       setArchivingOrderId(null)
+    }
+  }
+
+  const deleteArchivedOrderForever = async (orderId: string) => {
+    const confirmed = window.confirm('Удалить заказ навсегда? Это действие нельзя отменить.')
+    if (!confirmed) return
+
+    setDeletingOrderId(orderId)
+    setOrdersError(null)
+
+    try {
+      console.log('Deleting archived order:', orderId)
+
+      const { error: itemsDeleteError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', orderId)
+
+      console.log('Deleted order_items error:', itemsDeleteError)
+
+      if (itemsDeleteError) {
+        setOrdersError(
+          `Не удалось удалить позиции заказа. Заказ не удалён. Проверь delete policy для order_items: ${itemsDeleteError.message}`,
+        )
+        return
+      }
+
+      const { error: orderDeleteError } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderId)
+
+      console.log('Deleted order error:', orderDeleteError)
+
+      if (orderDeleteError) {
+        setOrdersError(
+          `Не удалось удалить заказ. Проверь delete policy для orders: ${orderDeleteError.message}`,
+        )
+        return
+      }
+
+      const { data: checkOrder, error: checkError } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('id', orderId)
+        .maybeSingle()
+
+      console.log('Check deleted order:', checkOrder, checkError)
+
+      if (checkError) {
+        setOrdersError(`Не удалось проверить удаление заказа: ${checkError.message}`)
+        return
+      }
+
+      if (checkOrder) {
+        setOrdersError('Заказ не был удалён из базы. Проверьте delete policy для orders.')
+        return
+      }
+
+      setOrders((prev) => prev.filter((order) => order.id !== orderId))
+    } catch (error) {
+      setOrdersError(`Не удалось удалить заказ навсегда: ${getErrorMessage(error)}`)
+    } finally {
+      setDeletingOrderId(null)
     }
   }
 
@@ -3153,15 +3208,28 @@ function AdminPage() {
                       {copiedOrderId === order.id ? 'Скопировано' : 'Скопировать заказ'}
                     </button>
                     {order.archived_at ? (
-                      <button
-                        type="button"
-                        onClick={() => void restoreOrder(order.id)}
-                        disabled={archivingOrderId === order.id}
-                        className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70"
-                      >
-                        <RotateCcw className="h-4 w-4" />
-                        Восстановить
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void restoreOrder(order.id)}
+                          disabled={archivingOrderId === order.id || deletingOrderId === order.id}
+                          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Восстановить
+                        </button>
+                        {showArchivedOrders && (
+                          <button
+                            type="button"
+                            onClick={() => void deleteArchivedOrderForever(order.id)}
+                            disabled={deletingOrderId === order.id || archivingOrderId === order.id}
+                            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-wait disabled:opacity-70"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {deletingOrderId === order.id ? 'Удаляем...' : 'Удалить навсегда'}
+                          </button>
+                        )}
+                      </>
                     ) : (
                       (order.status === 'completed' || order.status === 'cancelled') && (
                         <button
@@ -3662,6 +3730,37 @@ export default function App() {
       throw new Error('Введите корректный номер телефона перед сохранением заказа.')
     }
 
+    const linesWithoutProductId = cartLines.filter(
+      (line) => !String(line.product.id ?? '').trim(),
+    )
+    if (linesWithoutProductId.length > 0) {
+      throw new Error('У товара нет id. Обновите страницу и добавьте товар заново.')
+    }
+
+    const productIds = Array.from(
+      new Set(cartLines.map((line) => String(line.product.id))),
+    )
+
+    console.log('Cart lines before checkout:', cartLines)
+    console.log('Cart product ids:', productIds)
+
+    const { data: existingProducts, error: productsError } = await supabase
+      .from('products')
+      .select('id')
+      .in('id', productIds)
+
+    if (productsError) {
+      throw new Error(`Не удалось проверить товары в корзине: ${productsError.message}`)
+    }
+
+    console.log('Existing product ids from Supabase:', existingProducts)
+    const existingIds = new Set((existingProducts ?? []).map((product) => String(product.id)))
+    const missingItems = cartLines.filter((line) => !existingIds.has(String(line.product.id)))
+
+    if (missingItems.length > 0) {
+      throw new Error('Товар в корзине устарел. Очистите корзину и добавьте товар заново.')
+    }
+
     const clientType = isB2B ? CUSTOMER_TYPE_LABELS['wholesale'] : CUSTOMER_TYPE_LABELS['retail']
     const orderType = isB2B ? ORDER_TYPE_LABELS['wholesale'] : ORDER_TYPE_LABELS['retail']
     const receivingType = FULFILLMENT_LABELS[checkoutForm.fulfillment as FulfillmentType]
@@ -3714,7 +3813,7 @@ export default function App() {
 
       return {
         order_id: order.id,
-        product_id: getProductOrderItemId(line.product),
+        product_id: String(line.product.id),
         product_name: line.product.name,
         quantity_kg: line.volume,
         price_per_kg: pricePerKg,
@@ -3724,7 +3823,13 @@ export default function App() {
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
 
-    if (itemsError) throw new Error(`Не удалось сохранить товары заказа: ${itemsError.message}`)
+    if (itemsError) {
+      const { error: cleanupError } = await supabase.from('orders').delete().eq('id', order.id)
+      const cleanupMessage = cleanupError
+        ? ` Пустой заказ не удалось удалить автоматически: ${cleanupError.message}`
+        : ''
+      throw new Error(`Не удалось сохранить товары заказа. Заказ отменён.${cleanupMessage} Ошибка: ${itemsError.message}`)
+    }
   }
 
   const handleSubmitCheckout = async () => {
