@@ -1325,6 +1325,7 @@ function AdminProductsPanel() {
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [visibilityUpdatingId, setVisibilityUpdatingId] = useState<string | null>(null)
+  const [quickUpdatingProductId, setQuickUpdatingProductId] = useState<string | null>(null)
 
   const resetProductForm = () => {
     setForm(emptyAdminProductForm)
@@ -1591,8 +1592,70 @@ function AdminProductsPanel() {
     }
   }
 
+  const applyQuickProductUpdate = async (
+    product: AdminProduct,
+    patch: Partial<Pick<AdminProduct, 'stock_amount' | 'in_stock' | 'is_in_transit'>>,
+    message: string,
+  ) => {
+    setQuickUpdatingProductId(product.id)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      const { data, error: updateError } = await supabase
+        .from('products')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', product.id)
+        .select('*')
+
+      if (updateError) throw updateError
+
+      const updatedProduct = data?.[0] ? toAdminProduct(data[0]) : { ...product, ...patch }
+      setProducts((prev) =>
+        prev.map((item) => (item.id === product.id ? updatedProduct : item)),
+      )
+      if (editingId === product.id) {
+        setForm(adminProductToForm(updatedProduct))
+      }
+      setSuccess(message)
+    } catch (quickUpdateError) {
+      setError(`Не удалось быстро обновить товар: ${getErrorMessage(quickUpdateError)}`)
+    } finally {
+      setQuickUpdatingProductId(null)
+    }
+  }
+
+  const adjustProductStock = (product: AdminProduct, delta: number) => {
+    const nextStock = Math.max(0, product.stock_amount + delta)
+    void applyQuickProductUpdate(
+      product,
+      { stock_amount: nextStock },
+      `Остаток товара «${product.name}» обновлён: ${nextStock} ${product.unit || 'кг'}.`,
+    )
+  }
+
+  const toggleProductStockStatus = (product: AdminProduct) => {
+    const nextInStock = !product.in_stock
+    void applyQuickProductUpdate(
+      product,
+      { in_stock: nextInStock },
+      nextInStock ? 'Товар отмечен как в наличии.' : 'Товар отмечен как нет в наличии.',
+    )
+  }
+
+  const toggleProductTransitStatus = (product: AdminProduct) => {
+    const nextInTransit = !product.is_in_transit
+    void applyQuickProductUpdate(
+      product,
+      { is_in_transit: nextInTransit },
+      nextInTransit ? 'Товар отмечен как в пути.' : 'Товар отмечен как не в пути.',
+    )
+  }
+
   const textInputClass =
     'mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20'
+  const quickButtonClass =
+    'min-h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60'
 
   return (
     <section className="space-y-4">
@@ -1859,6 +1922,7 @@ function AdminProductsPanel() {
         <main className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredProducts.map((product) => {
             const productImage = product.image_url || product.image
+            const isQuickUpdating = quickUpdatingProductId === product.id
 
             return (
               <article key={product.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
@@ -1894,6 +1958,78 @@ function AdminProductsPanel() {
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">Откуда товар</dt><dd className="font-semibold text-slate-800">{product.origin || '-'}</dd></div>
                     </dl>
                     {product.description && <p className="mt-3 text-sm text-slate-600">{product.description}</p>}
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-bold text-slate-800">Быстрые действия</p>
+                        {isQuickUpdating && (
+                          <span className="text-xs font-semibold text-brand-700">Обновляем...</span>
+                        )}
+                      </div>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Быстрый остаток
+                          </p>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => adjustProductStock(product, 10)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              +10 кг
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustProductStock(product, 50)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              +50 кг
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustProductStock(product, -10)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              -10 кг
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustProductStock(product, -50)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              -50 кг
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Быстрый статус
+                          </p>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleProductStockStatus(product)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              {product.in_stock ? 'Нет в наличии' : 'В наличии'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleProductTransitStatus(product)}
+                              disabled={isQuickUpdating}
+                              className={quickButtonClass}
+                            >
+                              {product.is_in_transit ? 'Не в пути' : 'В пути'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button type="button" onClick={() => startEdit(product)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100">
                         Редактировать
