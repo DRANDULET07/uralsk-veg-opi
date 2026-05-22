@@ -5,7 +5,6 @@ import {
   CalendarCheck,
   CheckCircle2,
   Download,
-  Leaf,
   Lock,
   LogOut,
   MapPin,
@@ -14,12 +13,10 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Scale,
   Search,
   ShoppingCart,
   Trash2,
   Truck,
-  User,
   X,
 } from 'lucide-react'
 import { supabase } from './lib/supabase'
@@ -1071,6 +1068,12 @@ function matchesWarehouse(product: Product, warehouse: WarehouseFilterId): boole
 function matchesInStockOnly(product: Product, onlyInStock: boolean): boolean {
   if (!onlyInStock) return true
   return product.availability === 'warehouse' && product.in_stock !== false
+}
+
+function matchesLowStock(product: Product, onlyLowStock: boolean): boolean {
+  if (!onlyLowStock) return true
+  const stock = getAvailableStockKg(product)
+  return stock > 0 && stock <= 50
 }
 
 function sortProducts(products: Product[], sortBy: SortOption): Product[] {
@@ -2480,6 +2483,8 @@ function AdminProductsPanel() {
               </div>
             </section>
 
+            <h2 className="mt-4 mb-2 text-lg font-semibold text-slate-900 lg:mt-6 lg:hidden">Все товары</h2>
+
             <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <h4 className="text-base font-bold text-slate-900">Цены и остатки</h4>
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -3534,6 +3539,9 @@ function AdminPage() {
     }
     const roundMoney = (value: number) => Math.round(Number(value) || 0)
     const roundKg = (value: number) => Math.round((Number(value) || 0) * 100) / 100
+    const formatExcelMoney = (value: number) => formatCurrency(roundMoney(value))
+    const formatExcelKg = (value: number) => `${roundKg(value).toLocaleString('ru-RU')} кг`
+    const formatExcelPercent = (value: number) => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`
 
     try {
       setOrdersError(null)
@@ -3574,6 +3582,64 @@ function AdminPage() {
         XLSX.utils.book_append_sheet(workbook, sheet, name)
       }
 
+      const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
+      const createSummarySheet = (workbook: import('xlsx').WorkBook) => {
+        const now = new Date()
+        const summaryRows = [
+          ['ОПТ ОВОЩИ УРАЛЬСК — ОТЧЁТ', ''],
+          [],
+          ['Период отчёта', periodLabel],
+          ['Дата выгрузки', now.toLocaleString('ru-RU')],
+          [],
+          ['Финансы', ''],
+          ['Выручка', formatExcelMoney(orderAnalytics.completedRevenue)],
+          ['Ожидаемая сумма', formatExcelMoney(orderAnalytics.expectedAmount)],
+          ['Отменённая сумма', formatExcelMoney(orderAnalytics.cancelledAmount)],
+          ['Общий оборот', formatExcelMoney(orderAnalytics.totalTurnover)],
+          ['Средний чек', formatExcelMoney(orderAnalytics.averageCheck)],
+          [],
+          ['Заказы', ''],
+          ['Количество заказов', reportFilteredOrders.length],
+          ['Выполнено', reportFilteredOrders.filter((order) => order.status === 'completed').length],
+          ['Новые / В работе', reportFilteredOrders.filter((order) => order.status === 'new' || order.status === 'processing').length],
+          ['Отменено', reportFilteredOrders.filter((order) => order.status === 'cancelled').length],
+          [],
+          ['Вес', ''],
+          ['Всего кг', formatExcelKg(orderAnalytics.totalWeightKg)],
+          ['Выполнено кг', formatExcelKg(orderAnalytics.completedWeightKg)],
+          ['Ожидается кг', formatExcelKg(orderAnalytics.expectedWeightKg)],
+          ['Отменено кг', formatExcelKg(orderAnalytics.cancelledWeightKg)],
+        ]
+
+        const sheet = XLSX.utils.aoa_to_sheet(summaryRows)
+        sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }]
+        const columnWidths = [0, 0]
+        summaryRows.forEach((row) => {
+          row.forEach((cell, index) => {
+            const length = String(cell ?? '').length
+            if (length > columnWidths[index]) columnWidths[index] = length
+          })
+        })
+        sheet['!cols'] = columnWidths.map((length) => ({ wch: Math.min(Math.max(length + 2, 12), 48) }))
+
+        const boldRows = new Set([0, 5, 12, 17])
+        summaryRows.forEach((row, rowIndex) => {
+          row.forEach((cell, colIndex) => {
+            if (!cell) return
+            const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })
+            const sheetCell = sheet[address]
+            if (!sheetCell) return
+            const isSectionTitle = boldRows.has(rowIndex)
+            sheetCell.s = {
+              ...(sheetCell.s ?? {}),
+              font: { bold: isSectionTitle || rowIndex === 0, sz: rowIndex === 0 ? 14 : 11 },
+            }
+          })
+        })
+
+        XLSX.utils.book_append_sheet(workbook, sheet, 'Сводка')
+      }
+
       const { data: clientsData, error: clientsError } = await supabase
         .from('clients')
         .select('id, name, phone, client_type, client_note')
@@ -3595,44 +3661,35 @@ function AdminPage() {
       )
 
       const workbook = XLSX.utils.book_new()
-      const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
+      createSummarySheet(workbook)
 
-      addSheet(
-        workbook,
-        'Сводка',
-        [
-          { Показатель: 'Период отчёта', Значение: periodLabel },
-          { Показатель: 'Выручка', Значение: roundMoney(orderAnalytics.completedRevenue) },
-          { Показатель: 'Ожидаемая сумма', Значение: roundMoney(orderAnalytics.expectedAmount) },
-          { Показатель: 'Отменённая сумма', Значение: roundMoney(orderAnalytics.cancelledAmount) },
-          { Показатель: 'Общий оборот', Значение: roundMoney(orderAnalytics.totalTurnover) },
-          { Показатель: 'Средний чек', Значение: roundMoney(orderAnalytics.averageCheck) },
-          { Показатель: 'Количество заказов', Значение: reportFilteredOrders.length },
-          { Показатель: 'Всего кг', Значение: roundKg(orderAnalytics.totalWeightKg) },
-          { Показатель: 'Выполнено кг', Значение: roundKg(orderAnalytics.completedWeightKg) },
-          { Показатель: 'Ожидается кг', Значение: roundKg(orderAnalytics.expectedWeightKg) },
-          { Показатель: 'Отменено кг', Значение: roundKg(orderAnalytics.cancelledWeightKg) },
-        ],
-        { headers: ['Показатель', 'Значение'] },
-      )
+      const orderRows: ExcelRow[] = reportFilteredOrders.map((order) => ({
+        'Дата заказа': formatExcelDate(order.created_at),
+        'Номер/ID заказа': order.id,
+        'Имя клиента': order.customer_name || '',
+        Телефон: formatPhoneForDisplay(normalizePhone(order.customer_phone)),
+        'Тип заказа': order.order_type || '',
+        Получение: order.receiving_type || '',
+        Статус: ADMIN_STATUS_LABELS[order.status],
+        Сумма: formatExcelMoney(order.total_amount),
+        'Общий вес': formatExcelKg(order.total_weight_kg),
+        'Адрес доставки': order.delivery_address ?? '',
+        'Комментарий клиента': order.comment ?? '',
+        'Заметка работника': order.staff_note ?? '',
+      }))
+      const ordersTotalAmount = reportFilteredOrders.reduce((sum, order) => sum + order.total_amount, 0)
+      const ordersTotalWeight = reportFilteredOrders.reduce((sum, order) => sum + order.total_weight_kg, 0)
+      orderRows.push({
+        'Дата заказа': 'Итого заказов',
+        'Номер/ID заказа': reportFilteredOrders.length,
+        Сумма: formatExcelMoney(ordersTotalAmount),
+        'Общий вес': formatExcelKg(ordersTotalWeight),
+      })
 
       addSheet(
         workbook,
         'Заказы',
-        reportFilteredOrders.map((order) => ({
-          'Дата заказа': formatExcelDate(order.created_at),
-          'Номер/ID заказа': order.id,
-          'Имя клиента': order.customer_name || '',
-          Телефон: formatPhoneForDisplay(normalizePhone(order.customer_phone)),
-          'Тип заказа': order.order_type || '',
-          Получение: order.receiving_type || '',
-          Статус: ADMIN_STATUS_LABELS[order.status],
-          Сумма: roundMoney(order.total_amount),
-          'Общий вес': roundKg(order.total_weight_kg),
-          'Адрес доставки': order.delivery_address ?? '',
-          'Комментарий клиента': order.comment ?? '',
-          'Заметка работника': order.staff_note ?? '',
-        })),
+        orderRows,
         {
           autoFilter: true,
           headers: [
@@ -3651,6 +3708,29 @@ function AdminPage() {
           ],
         },
       )
+
+      const statusRows = (
+        [
+          { key: 'new' as AdminOrderStatus, label: ADMIN_STATUS_LABELS.new },
+          { key: 'processing' as AdminOrderStatus, label: ADMIN_STATUS_LABELS.processing },
+          { key: 'completed' as AdminOrderStatus, label: ADMIN_STATUS_LABELS.completed },
+          { key: 'cancelled' as AdminOrderStatus, label: ADMIN_STATUS_LABELS.cancelled },
+        ] as const
+      ).map((statusItem) => {
+        const statusOrders = reportFilteredOrders.filter((order) => order.status === statusItem.key)
+        const statusAmount = statusOrders.reduce((sum, order) => sum + order.total_amount, 0)
+        const statusWeight = statusOrders.reduce((sum, order) => sum + order.total_weight_kg, 0)
+        return {
+          Статус: statusItem.label,
+          'Количество заказов': statusOrders.length,
+          Сумма: formatExcelMoney(statusAmount),
+          Кг: formatExcelKg(statusWeight),
+        }
+      })
+      addSheet(workbook, 'Статусы', statusRows, {
+        autoFilter: true,
+        headers: ['Статус', 'Количество заказов', 'Сумма', 'Кг'],
+      })
 
       const productTotals = new Map<
         string,
@@ -3680,19 +3760,31 @@ function AdminPage() {
         })
       })
 
+      const allProductRows: ExcelRow[] = Array.from(productTotals.values())
+        .sort((a, b) => b.totalAmount - a.totalAmount)
+        .map((item) => ({
+          'Название товара': item.productName,
+          'Количество заказов': item.orderIds.size,
+          'Количество позиций': item.positionCount,
+          'Общий вес кг': formatExcelKg(item.totalQuantityKg),
+          'Общая сумма': formatExcelMoney(item.totalAmount),
+          'Средняя цена за кг': item.totalQuantityKg > 0 ? formatExcelMoney(item.totalAmount / item.totalQuantityKg) : formatExcelMoney(0),
+        }))
+
+      const totalPositions = allProductRows.reduce((sum, item) => sum + Number(item['Количество позиций'] || 0), 0)
+      const totalProductsAmount = Array.from(productTotals.values()).reduce((sum, item) => sum + item.totalAmount, 0)
+      const totalProductsKg = Array.from(productTotals.values()).reduce((sum, item) => sum + item.totalQuantityKg, 0)
+      allProductRows.push({
+        'Название товара': 'Итого позиций',
+        'Количество позиций': totalPositions,
+        'Общий вес кг': formatExcelKg(totalProductsKg),
+        'Общая сумма': formatExcelMoney(totalProductsAmount),
+      })
+
       addSheet(
         workbook,
         'Товары',
-        Array.from(productTotals.values())
-          .sort((a, b) => b.totalAmount - a.totalAmount)
-          .map((item) => ({
-            'Название товара': item.productName,
-            'Количество заказов': item.orderIds.size,
-            'Количество позиций': item.positionCount,
-            'Общий вес кг': roundKg(item.totalQuantityKg),
-            'Общая сумма': roundMoney(item.totalAmount),
-            'Средняя цена за кг': item.totalQuantityKg > 0 ? roundMoney(item.totalAmount / item.totalQuantityKg) : 0,
-          })),
+        allProductRows,
         {
           autoFilter: true,
           headers: [
@@ -3705,6 +3797,31 @@ function AdminPage() {
           ],
         },
       )
+
+      const topProductRows: ExcelRow[] = Array.from(productTotals.values())
+        .sort((a, b) => b.totalAmount - a.totalAmount)
+        .map((item) => ({
+          Товар: item.productName,
+          'Количество заказов/позиций': `${item.orderIds.size}/${item.positionCount}`,
+          'Общий вес кг': formatExcelKg(item.totalQuantityKg),
+          'Общая сумма': formatExcelMoney(item.totalAmount),
+          'Доля от оборота': formatExcelPercent(
+            orderAnalytics.totalTurnover > 0
+              ? (item.totalAmount / orderAnalytics.totalTurnover) * 100
+              : 0,
+          ),
+        }))
+
+      addSheet(workbook, 'Топ товаров', topProductRows, {
+        autoFilter: true,
+        headers: [
+          'Товар',
+          'Количество заказов/позиций',
+          'Общий вес кг',
+          'Общая сумма',
+          'Доля от оборота',
+        ],
+      })
 
       const clientTotals = new Map<
         string,
@@ -3746,30 +3863,45 @@ function AdminPage() {
         })
       })
 
+      const clientRows: ExcelRow[] = Array.from(clientTotals.values())
+        .sort((a, b) => b.totalAmount - a.totalAmount)
+        .map((client) => {
+          const stats = {
+            orderCount: client.orderCount,
+            totalAmount: client.totalAmount,
+            averageAmount: client.orderCount > 0 ? client.totalAmount / client.orderCount : 0,
+            lastOrderAt: client.lastOrderAt,
+          }
+
+          return {
+            'Имя клиента': client.name,
+            Телефон: formatPhoneForDisplay(normalizePhone(client.phone)),
+            'Количество заказов': stats.orderCount,
+            'Общая сумма': formatExcelMoney(stats.totalAmount),
+            'Средний чек': formatExcelMoney(stats.averageAmount),
+            'Последний заказ': formatExcelDate(stats.lastOrderAt),
+            Статус: getAdminClientStatus(stats).label,
+            'Заметка работника': client.clientNote ?? '',
+          }
+        })
+
+      clientRows.push({
+        'Имя клиента': 'Итого клиентов',
+        'Количество заказов': clientRows.length,
+        'Общая сумма': formatExcelMoney(
+          Array.from(clientTotals.values()).reduce((sum, client) => sum + client.totalAmount, 0),
+        ),
+        'Средний чек': formatExcelMoney(
+          reportFilteredOrders.length > 0
+            ? reportFilteredOrders.reduce((sum, order) => sum + order.total_amount, 0) / reportFilteredOrders.length
+            : 0,
+        ),
+      })
+
       addSheet(
         workbook,
         'Клиенты',
-        Array.from(clientTotals.values())
-          .sort((a, b) => b.totalAmount - a.totalAmount)
-          .map((client) => {
-            const stats = {
-              orderCount: client.orderCount,
-              totalAmount: client.totalAmount,
-              averageAmount: client.orderCount > 0 ? client.totalAmount / client.orderCount : 0,
-              lastOrderAt: client.lastOrderAt,
-            }
-
-            return {
-              'Имя клиента': client.name,
-              Телефон: formatPhoneForDisplay(normalizePhone(client.phone)),
-              'Количество заказов': stats.orderCount,
-              'Общая сумма': roundMoney(stats.totalAmount),
-              'Средний чек': roundMoney(stats.averageAmount),
-              'Последний заказ': formatExcelDate(stats.lastOrderAt),
-              Статус: getAdminClientStatus(stats).label,
-              'Заметка работника': client.clientNote ?? '',
-            }
-          }),
+        clientRows,
         {
           autoFilter: true,
           headers: [
@@ -5228,6 +5360,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilterId>('all')
   const [onlyInStock, setOnlyInStock] = useState(false)
+  const [onlyLowStock, setOnlyLowStock] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [isB2B, setIsB2B] = useState(true)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -5266,7 +5399,6 @@ export default function App() {
   const [clientOrdersError, setClientOrdersError] = useState<string | null>(null)
   const [clientOrdersSuccess, setClientOrdersSuccess] = useState<string | null>(null)
   const [cancellingClientOrderId, setCancellingClientOrderId] = useState<string | null>(null)
-  const [hasStoredOrderIds, setHasStoredOrderIds] = useState(false)
   const [hasSearchedClientOrders, setHasSearchedClientOrders] = useState(false)
   const [isLoadingClientOrders, setIsLoadingClientOrders] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -5388,7 +5520,6 @@ export default function App() {
   useEffect(() => {
     const storedLastOrder = localStorage.getItem(LOCAL_STORAGE_LAST_ORDER)
     const storedHistory = localStorage.getItem(LOCAL_STORAGE_HISTORY)
-    setHasStoredOrderIds(getStoredOrderIds().length > 0)
 
     if (storedLastOrder) {
       try {
@@ -5450,16 +5581,25 @@ export default function App() {
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
+  const lowStockCount = useMemo(
+    () => products.filter((product) => {
+      const stock = getAvailableStockKg(product)
+      return stock > 0 && stock <= 50
+    }).length,
+    [products],
+  )
+
   const filteredProducts = useMemo(() => {
     const list = products.filter(
       (p) =>
         matchesTab(p, activeTab) &&
         matchesSearch(p, normalizedSearch) &&
         matchesWarehouse(p, warehouseFilter) &&
-        matchesInStockOnly(p, onlyInStock),
+        matchesInStockOnly(p, onlyInStock) &&
+        matchesLowStock(p, onlyLowStock),
     )
     return sortProducts(list, sortBy)
-  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, products, sortBy])
+  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, onlyLowStock, products, sortBy])
 
   const cartLines = useMemo(() => getCartLines(cart, products, isB2B), [cart, isB2B, products])
   const cartCount = cartLines.length
@@ -5472,6 +5612,7 @@ export default function App() {
     normalizedSearch.length > 0 ||
     warehouseFilter !== 'all' ||
     onlyInStock ||
+    onlyLowStock ||
     sortBy !== 'default'
 
   const setProductVolume = (product: Product, raw: number) => {
@@ -5764,7 +5905,6 @@ export default function App() {
     try {
       const createdOrderId = await saveCheckoutOrderToSupabase(normalizedPhone)
       saveOrderIdToLocalStorage(createdOrderId)
-      setHasStoredOrderIds(true)
 
       const whatsappUrl = getCartWhatsAppUrl(
         cartLines,
@@ -5982,46 +6122,56 @@ export default function App() {
     setCartError('Товары добавлены в корзину')
   }
 
+  const popularProducts = products.slice(0, 6)
+  const detailProduct = analyticsOpenId
+    ? products.find((product) => product.id === analyticsOpenId) ?? null
+    : null
+  const detailProductConfig = detailProduct ? getProductDisplayConfig(detailProduct, isB2B) : null
+  const detailProductVolume = detailProduct
+    ? volumes[detailProduct.id] ?? detailProductConfig?.defaultVolume ?? 0
+    : 0
+  const detailProductPricing = detailProduct
+    ? calcPricing(detailProduct, detailProductVolume, isB2B)
+    : { discount: 0, pricePerKg: 0, total: 0 }
+  const detailSecondaryPrice = detailProduct
+    ? isB2B
+      ? detailProduct.retail_price ?? detailProduct.basePrice + RETAIL_MARKUP
+      : detailProduct.wholesale_price ?? detailProduct.basePrice
+    : 0
+  const detailPrimaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
+  const detailSecondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
+  const detailProductStockDisplay = detailProduct ? getStockDisplay(detailProduct) : null
+
   return (
-    <div className="min-h-dvh bg-slate-100 pb-24 lg:pb-10">
+    <div className="min-h-dvh bg-slate-100 pb-28 lg:pb-10">
       <div className="relative border-b border-slate-200 bg-white shadow-sm">
-        <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:px-6">
+        <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-white lg:px-6">
           <div className="mx-auto w-full max-w-[1400px]">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-100/80">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
                 URALSK VEG OPI
               </p>
-              <h1 className="mt-1 text-xl font-bold leading-tight tracking-tight sm:text-2xl lg:text-3xl">
+              <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
                 ОПТ ОВОЩИ УРАЛЬСК
               </h1>
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
+                Овощи оптом и в розницу в Уральске
+              </p>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+
+            <div className="mt-2 flex items-center gap-2 sm:mt-0 sm:flex-wrap sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={() => {
                   setClientOrdersOpen(true)
                   void loadClientOrders()
                 }}
-                className="hidden rounded-full bg-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:inline-flex"
+                className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20 active:scale-95"
+                aria-label="Заказы"
               >
-                <Package className="mr-2 h-4 w-4" strokeWidth={2} />
-                Мои заказы
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setClientOrdersOpen(true)
-                  void loadClientOrders()
-                }}
-                className="relative flex h-10 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:hidden"
-                aria-label="Мои заказы"
-              >
-                <Package className="mr-2 h-4 w-4" strokeWidth={2} />
-                Заказы
-                {hasStoredOrderIds && (
-                  <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
-                )}
+                <Package className="h-4 w-4" strokeWidth={2} />
+                <span className="text-xs font-semibold whitespace-nowrap">Заказы</span>
               </button>
               <button
                 type="button"
@@ -6029,31 +6179,20 @@ export default function App() {
                   setCheckoutStep('cart')
                   setCartOpen(true)
                 }}
-                className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
+                className="relative inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow transition hover:bg-emerald-400 active:scale-95"
                 aria-label={`Корзина: ${cartCount} позиций`}
               >
-                <ShoppingCart className="h-5 w-5" strokeWidth={2} />
+                <ShoppingCart className="h-4 w-4" strokeWidth={2} />
+                <span className="text-xs font-semibold whitespace-nowrap">Корзина</span>
                 {cartCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white shadow-md">
+                  <span className="absolute -right-2 -top-2 inline-flex items-center justify-center rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                     {cartCount}
                   </span>
                 )}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setClientOrdersOpen(true)
-                  void loadClientOrders()
-                }}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
-                aria-label="Мои заказы"
-              >
-                <User className="h-5 w-5" strokeWidth={2} />
-              </button>
-              <Leaf className="h-9 w-9 text-brand-100" strokeWidth={1.5} aria-hidden />
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-white/10 p-1 text-sm text-white sm:max-w-md" role="tablist" aria-label="Тип покупателя">
+          <div className="mt-4 grid grid-cols-2 gap-1 rounded-2xl bg-white/10 p-1 text-sm text-white sm:max-w-md" role="tablist" aria-label="Тип покупателя">
             <button
               type="button"
               onClick={() => setIsB2B(true)}
@@ -6100,14 +6239,14 @@ export default function App() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Поиск овощей..."
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-9 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-10 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
               aria-label="Поиск овощей"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
                 aria-label="Очистить поиск"
               >
                 <X className="h-4 w-4" />
@@ -6115,16 +6254,129 @@ export default function App() {
             )}
           </label>
 
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === tab.id
+                    ? 'bg-emerald-700 text-white shadow-lg shadow-emerald-700/20'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setOnlyLowStock((value) => !value)}
+              className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                onlyLowStock
+                  ? 'bg-emerald-700 text-white shadow-lg shadow-emerald-700/20'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+              aria-pressed={onlyLowStock}
+            >
+              Мало остатка{lowStockCount > 0 ? ` (${lowStockCount})` : ''}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 rounded-3xl bg-emerald-50/90 p-4 text-sm text-emerald-950 shadow-sm sm:grid-cols-3">
+            <div className="flex items-start gap-3 rounded-3xl bg-white p-3 shadow-sm">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+              <div>
+                <p className="font-semibold">Цены и остатки актуальны</p>
+                <p className="mt-1 text-xs text-emerald-800/80">Мы обновляем данные ежедневно</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-3xl bg-white p-3 shadow-sm">
+              <ShoppingCart className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+              <div>
+                <p className="font-semibold">Заказ через WhatsApp</p>
+                <p className="mt-1 text-xs text-emerald-800/80">Удобно оформить заказ одним сообщением</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-3xl bg-white p-3 shadow-sm">
+              <Truck className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+              <div>
+                <p className="font-semibold">Самовывоз или доставка</p>
+                <p className="mt-1 text-xs text-emerald-800/80">Выберите удобный способ получения</p>
+              </div>
+            </div>
+          </div>
+
+          {popularProducts.length > 0 && (
+            <section className="mt-5 lg:hidden">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-slate-900">Популярные овощи</p>
+                  <p className="mt-1 text-sm text-slate-500">Лучшие предложения сегодня</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('product-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Смотреть все
+                </button>
+              </div>
+              <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
+                <div className="flex gap-3 snap-x snap-mandatory touch-pan-x">
+                  {popularProducts.map((product) => {
+                    const productImage = product.image_url || product.image
+                    const stockDisplay = getStockDisplay(product)
+                    const isProductInStock = product.in_stock !== false
+
+                    return (
+                      <article
+                        key={product.id}
+                        className="snap-start min-w-[15rem] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                      >
+                        <div className="relative h-32 w-full overflow-hidden bg-slate-100">
+                          <ProductImage
+                            src={productImage}
+                            alt={product.name}
+                            className="h-full w-full object-cover"
+                            imgClassName="h-full w-full object-cover"
+                            fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
+                          />
+                        </div>
+                        <div className="space-y-2 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                            {product.category ?? product.subtitle}
+                          </p>
+                          <h3 className="text-sm font-bold text-slate-900 line-clamp-2">{product.name}</h3>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${statusToneClass[product.statusTone]}`}>
+                              {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
+                            </span>
+                            <span className="text-xs text-slate-500">{stockDisplay.label}</span>
+                          </div>
+                          <div className="rounded-3xl bg-slate-50 p-3 text-sm">
+                            <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{isB2B ? 'Опт' : 'Розница'}</p>
+                            <p className="mt-1 font-bold text-slate-900">{formatCurrency(isB2B ? product.basePrice : product.wholesale_price ?? product.basePrice)}/кг</p>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              </div>
+            </section>
+          )}
+
           <div
             className="mt-3 space-y-2 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5 md:flex md:items-center md:gap-3 md:space-y-0"
             aria-label="Расширенные фильтры"
           >
             <div className="flex items-center gap-2 md:min-w-[17rem]">
-              <MapPin className="h-4 w-4 shrink-0 text-brand-600" aria-hidden />
+              <MapPin className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
               <select
                 value={warehouseFilter}
                 onChange={(e) => setWarehouseFilter(e.target.value as WarehouseFilterId)}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                 aria-label="Фильтр по складу"
               >
                 {WAREHOUSE_FILTERS.map((wh) => (
@@ -6141,8 +6393,8 @@ export default function App() {
                 onClick={() => setOnlyInStock((v) => !v)}
                 className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.98] ${
                   onlyInStock
-                    ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700'
+                    ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
                 }`}
                 aria-pressed={onlyInStock}
               >
@@ -6154,7 +6406,7 @@ export default function App() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as SortOption)}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                   aria-label="Сортировка по цене"
                 >
                   {SORT_OPTIONS.map((opt) => (
@@ -6166,28 +6418,9 @@ export default function App() {
               </div>
             </div>
           </div>
-
-          <nav className="mt-3" aria-label="Фильтр ассортимента">
-            <div className="flex gap-2 overflow-x-auto scrollbar-none">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-brand-700 text-white shadow-md'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </nav>
-          </div>
         </div>
       </div>
+    </div>
 
       <main className="mx-auto grid w-full max-w-[1400px] gap-6 px-3 pt-4 sm:px-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:px-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="min-w-0 space-y-4">
@@ -6246,223 +6479,231 @@ export default function App() {
                 : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
           </p>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredProducts.map((product) => {
-          const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
-          const { discount, pricePerKg, total } = calcPricing(product, volume, isB2B)
-          const hasDiscount = discount > 0
-          const inCart = product.id in cart
-          const justAdded = addedProductId === product.id
-          const stockDisplay = getStockDisplay(product)
-          const cannotOrderProduct = !canOrderProduct(product, isB2B)
-          const analyticsActionClass = 'bg-white text-slate-600'
-          const productImage = product.image_url || product.image
-          const secondaryPrice = isB2B
-            ? product.retail_price ?? product.basePrice + RETAIL_MARKUP
-            : product.wholesale_price ?? product.basePrice
-          const primaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
-          const secondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
-          const deliveryEta = product.delivery_eta?.trim() || 'Скоро'
-          const isProductInStock = product.in_stock !== false
-          const isUnavailable = product.in_stock === false && product.is_in_transit !== true
+          <div id="product-grid" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredProducts.map((product) => {
+              const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
+                          const { pricePerKg } = calcPricing(product, volume, isB2B)
+                          const inCart = product.id in cart
+                          const justAdded = addedProductId === product.id
+              const cannotOrderProduct = !canOrderProduct(product, isB2B)
+              const productImage = product.image_url || product.image
+              const secondaryPrice = isB2B
+                ? product.retail_price ?? product.basePrice + RETAIL_MARKUP
+                : product.wholesale_price ?? product.basePrice
+              const primaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
+              const secondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
+              const isProductInStock = product.in_stock !== false
+              const isUnavailable = product.in_stock === false && product.is_in_transit !== true
+              const compactMeta = [product.variant, product.origin, product.subtitle].filter(Boolean).join(' · ')
+              const cfg = getProductDisplayConfig(product, isB2B)
+              const step = isB2B ? 25 : 1
+              const canDecrease = volume > cfg.sliderMin
+              const canIncrease = volume < cfg.sliderMax
 
-          return (
-            <article
-              key={product.id}
-              className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-lg shadow-slate-200/70 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-200/80"
-            >
-              <div className="group relative h-40 w-full overflow-hidden bg-slate-100 sm:h-48">
-                <ProductImage
-                  src={productImage}
-                  alt={product.name}
-                  className="h-full bg-slate-50"
-                  imgClassName="h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.03]"
-                  fallbackClassName="text-sm font-semibold text-slate-500"
-                />
-                {inCart && (
-                  <span className="absolute right-3 top-3 rounded-full bg-brand-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
-                    В корзине
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-1 flex-col space-y-3 p-4 sm:p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {product.category ?? product.subtitle}
-                    </p>
-                    <h2 className="mt-1 text-xl font-bold leading-tight text-slate-900">
-                      {product.name}
-                    </h2>
-                    {product.variant && (
-                      <p className="mt-0.5 text-sm font-semibold text-slate-500">
-                        {product.variant}
-                      </p>
+              return (
+                <article
+                  key={product.id}
+                  className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className="relative h-44 w-full overflow-hidden bg-slate-100">
+                    <ProductImage
+                      src={productImage}
+                      alt={product.name}
+                      className="h-full w-full object-cover"
+                      imgClassName="h-full w-full object-cover"
+                      fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
+                    />
+                    {inCart && (
+                      <span className="absolute right-3 top-3 rounded-full bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
+                        В корзине
+                      </span>
                     )}
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-bold ${statusToneClass[product.statusTone]}`}
-                  >
-                    {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет'}
-                  </span>
-                </div>
 
-                <div className="rounded-2xl bg-brand-50 px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      {primaryPriceLabel}
-                    </p>
-                    <p className="mt-1 text-2xl font-bold text-brand-900">
-                      {hasDiscount ? (
-                        <>
-                          <span className="mr-2 text-base font-normal text-slate-400 line-through">
-                            {formatCurrency(product.basePrice)}/кг
-                          </span>
-                          {formatCurrency(pricePerKg)}/кг
-                        </>
-                      ) : (
-                        <>{formatCurrency(pricePerKg)}/кг</>
-                      )}
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-500">
-                      {secondaryPriceLabel}: {formatCurrency(secondaryPrice)}/кг
-                    </p>
-                  </div>
-                  {hasDiscount && (
-                    <span className="shrink-0 rounded-full bg-brand-600 px-2.5 py-1 text-xs font-bold text-white">
-                      ?{discount.toFixed(1)}% опт
-                    </span>
-                  )}
-                  </div>
-                </div>
-
-                {product.is_in_transit ? (
-                  <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                    <div className="flex items-center gap-2 font-bold">
-                      <Truck className="h-4 w-4 text-sky-600" aria-hidden />
-                      Товар в пути
+                  <div className="lg:hidden flex flex-col gap-3 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          {product.category ?? product.subtitle}
+                        </p>
+                        <h3 className="mt-1 text-base font-bold text-slate-900 line-clamp-2">
+                          {product.name}
+                        </h3>
+                        {compactMeta && (
+                          <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">
+                            {compactMeta}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`ml-3 shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${statusToneClass[product.statusTone]}`}>
+                        {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
+                      </span>
                     </div>
-                    <p className="mt-1 font-semibold">Фура в пути</p>
-                    <p className="mt-1 text-sky-800">Ожидаемая поставка: {deliveryEta}</p>
-                  </div>
-                ) : isProductInStock ? (
-                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                    <div className="flex items-center gap-2 font-bold">
-                      <Package className="h-4 w-4 text-emerald-600" aria-hidden />
-                      На складе
-                    </div>
-                    <p className="mt-1 text-emerald-800">Доступно для заказа</p>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
-                    Нет в наличии
-                  </div>
-                )}
-                <p className="flex items-center gap-1.5 text-sm text-slate-600">
-                  <Scale className="h-4 w-4 text-brand-600" aria-hidden />
-                  {isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'}
-                </p>
-                {product.bookingNote && (
-                  <p className="flex items-center gap-1.5 text-sm font-medium text-brand-700">
-                    <Package className="h-4 w-4" aria-hidden />
-                    {product.bookingNote}
-                  </p>
-                )}
-                <p className="flex items-start gap-1.5 text-sm text-slate-600">
-                  {product.availability === 'transit' ? (
-                    <Truck className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" aria-hidden />
-                  ) : (
-                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden />
-                  )}
-                  {product.location}
-                </p>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => toggleAnalytics(product.id)}
-                    className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold transition"
-                  >
-                    <span>{product.analyticsTitle}</span>
-                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${analyticsActionClass}`}>
-                      {analyticsOpenId === product.id ? 'Скрыть' : 'Подробнее'}
-                    </span>
-                  </button>
 
-                  {analyticsOpenId === product.id && (
-                    <div className="mt-3 rounded-xl bg-white p-3 text-sm leading-relaxed text-slate-600">
-                      <p>{product.analyticsText}</p>
+                    <div className="flex items-end justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{primaryPriceLabel}</p>
+                        <p className="mt-1 text-lg font-bold text-brand-900">{formatCurrency(pricePerKg)}/кг</p>
+                      </div>
+                      <p className="text-xs text-slate-500">{secondaryPriceLabel}: {formatCurrency(secondaryPrice)}/кг</p>
                     </div>
-                  )}
-                </div>
 
-                <div className="mt-auto space-y-3 border-t border-slate-100 pt-3">
-                  <QuantitySelector
-                    product={product}
-                    value={volume}
-                    isB2B={isB2B}
-                    onChange={(nextVolume) => setProductVolume(product, nextVolume)}
-                  />
-                  <p
-                    className={`rounded-2xl bg-slate-50 px-4 py-3 text-center text-xl font-bold tabular-nums ${
-                      hasDiscount ? 'text-emerald-700' : 'text-slate-900'
-                    }`}
-                  >
-                    Итого за {formatVolumeLabel(product, volume, isB2B)}:{' '}
-                    <span className="tabular-nums">{formatCurrency(total)}</span>
-                  </p>
-                  {hasDiscount && (
-                    <p className="mt-1 text-center text-xs font-medium text-emerald-600">
-                      Прогрессивный опт: выгода {discount.toFixed(1)}% от базовой цены
-                    </p>
-                  )}
-                <button
-                  type="button"
-                  onClick={() => addToCart(product)}
-                  disabled={cannotOrderProduct}
-                  className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-base font-bold shadow-md transition active:scale-[0.98] hover:shadow-lg ${
-                    cannotOrderProduct
-                      ? 'cursor-not-allowed bg-slate-200 text-slate-500 shadow-none hover:shadow-md'
-                      : justAdded
-                      ? 'bg-emerald-700 text-white shadow-emerald-700/20'
-                      : inCart
-                        ? 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
-                        : 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
-                  }`}
-                >
-                  <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
-                  <span className="sm:hidden">
-                    {cannotOrderProduct
-                      ? isUnavailable || stockDisplay.stock <= 0
-                        ? 'Нет в наличии'
-                        : 'Недостаточно остатка'
-                      : justAdded
-                        ? 'Добавлено!'
-                        : inCart
-                          ? 'Добавить ещё в корзину'
-                          : 'Добавить в корзину'}
-                  </span>
-                  <span className="hidden sm:inline">
-                    {cannotOrderProduct
-                      ? isUnavailable || stockDisplay.stock <= 0
-                        ? 'Нет в наличии'
-                        : 'Недостаточно остатка'
-                      : justAdded
-                        ? 'Добавлено!'
-                        : inCart
-                          ? 'Добавить ещё'
-                          : 'В корзину'}
-                  </span>
-                </button>
-                </div>
-              </div>
-            </article>
-          )
-          })}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1">
+                        <button
+                          type="button"
+                          onClick={() => setProductVolume(product, snapVolume(volume - step, product, isB2B))}
+                          disabled={!canDecrease}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          aria-label={`Уменьшить количество ${product.name}`}
+                        >
+                          <Minus className="h-4 w-4" aria-hidden />
+                        </button>
+                        <div className="px-2 text-sm font-semibold text-slate-900">
+                          {formatVolumeLabel(product, volume, isB2B)}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setProductVolume(product, snapVolume(volume + step, product, isB2B))}
+                          disabled={!canIncrease}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          aria-label={`Увеличить количество ${product.name}`}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => addToCart(product)}
+                          disabled={cannotOrderProduct}
+                          className={`flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold text-white transition active:scale-[0.98] ${
+                            cannotOrderProduct
+                              ? 'cursor-not-allowed bg-slate-300 text-slate-500'
+                              : justAdded
+                              ? 'bg-emerald-700 shadow-emerald-700/20'
+                              : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700'
+                          }`}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden />
+                          {cannotOrderProduct ? (isUnavailable ? 'Нет в наличии' : 'Недостаточно остатка') : (justAdded ? 'Добавлено' : inCart ? 'Добавить' : 'В корзину')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleAnalytics(product.id)}
+                          className="text-sm text-slate-600 underline-offset-2 hover:underline"
+                        >
+                          Подробнее
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hidden lg:flex flex-1 flex-col space-y-3 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                          {product.category ?? product.subtitle}
+                        </p>
+                        <h2 className="mt-1 text-lg font-bold text-slate-900 truncate">
+                          {product.name}
+                        </h2>
+                        {compactMeta && (
+                          <p className="mt-1 text-sm text-slate-500 truncate">
+                            {compactMeta}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusToneClass[product.statusTone]}`}>
+                        {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
+                      </span>
+                    </div>
+
+                    <div className="rounded-[28px] bg-slate-50 p-4">
+                      <div className="flex items-end justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                            {primaryPriceLabel}
+                          </p>
+                          <p className="mt-1 text-2xl font-bold text-brand-900">
+                            {formatCurrency(pricePerKg)}/кг
+                          </p>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          {secondaryPriceLabel}: {formatCurrency(secondaryPrice)}/кг
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setProductVolume(product, snapVolume(volume - step, product, isB2B))}
+                          disabled={!canDecrease}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          aria-label={`Уменьшить количество ${product.name}`}
+                        >
+                          <Minus className="h-4 w-4" aria-hidden />
+                        </button>
+                        <div className="min-w-[5.5rem] text-center">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatVolumeLabel(product, volume, isB2B)}
+                          </p>
+                          <p className="text-[11px] text-slate-500">количество</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setProductVolume(product, snapVolume(volume + step, product, isB2B))}
+                          disabled={!canIncrease}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          aria-label={`Увеличить количество ${product.name}`}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                      <button
+                        type="button"
+                        onClick={() => addToCart(product)}
+                        disabled={cannotOrderProduct}
+                        className={`flex h-12 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold text-white transition active:scale-[0.98] ${
+                          cannotOrderProduct
+                            ? 'cursor-not-allowed bg-slate-300 text-slate-500'
+                            : justAdded
+                            ? 'bg-emerald-700 shadow-emerald-700/20'
+                            : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700'
+                        }`}
+                      >
+                        <Plus className="h-4 w-4" aria-hidden />
+                        {cannotOrderProduct
+                          ? isUnavailable
+                            ? 'Нет в наличии'
+                            : 'Недостаточно остатка'
+                          : justAdded
+                            ? 'Добавлено'
+                            : inCart
+                              ? 'Добавить ещё'
+                              : 'В корзину'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleAnalytics(product.id)}
+                        className="inline-flex h-12 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Подробнее
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         )}
-        </div>
+      </div>
 
         <aside className="hidden lg:block">
           <div className="sticky top-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
@@ -6571,20 +6812,28 @@ export default function App() {
       </footer>
 
       {cartCount > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            setCheckoutStep('cart')
-            setCartOpen(true)
-          }}
-          className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-xl transition hover:bg-brand-800 active:scale-95 lg:hidden"
-          aria-label={`Открыть корзину: ${cartCount} позиций`}
-        >
-          <ShoppingCart className="h-6 w-6" strokeWidth={2} />
-          <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-xs font-bold shadow-md">
-            {cartCount}
-          </span>
-        </button>
+        <div className="fixed inset-x-4 bottom-[max(1.25rem,env(safe-area-inset-bottom))] z-40 rounded-3xl border border-slate-200 bg-white p-3 shadow-2xl shadow-slate-900/10 backdrop-blur-sm lg:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Корзина • {cartCount} {cartCount === 1 ? 'товар' : cartCount < 5 ? 'товара' : 'товаров'}
+              </p>
+              <p className="mt-1 text-lg font-bold text-slate-900 tabular-nums">
+                {formatCurrency(cartGrandTotal)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setCheckoutStep('cart')
+                setCartOpen(true)
+              }}
+              className="inline-flex min-w-[9rem] items-center justify-center rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition hover:bg-emerald-600 active:scale-[0.98]"
+            >
+              Оформить
+            </button>
+          </div>
+        </div>
       )}
 
       {cartOpen && (
@@ -6715,6 +6964,117 @@ export default function App() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {analyticsOpenId && detailProduct && (
+        <div
+          className="fixed inset-0 z-[55] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="product-details-title"
+          onClick={() => setAnalyticsOpenId(null)}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative h-44 overflow-hidden bg-slate-100">
+              <ProductImage
+                src={detailProduct.image_url || detailProduct.image}
+                alt={detailProduct.name}
+                className="h-full w-full object-cover"
+                imgClassName="h-full w-full object-cover"
+                fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => setAnalyticsOpenId(null)}
+                className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm transition hover:bg-white"
+                aria-label="Закрыть детали товара"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+                  {detailProduct.category ?? detailProduct.subtitle}
+                </p>
+                <h3 id="product-details-title" className="mt-2 text-2xl font-bold text-slate-900">
+                  {detailProduct.name}
+                </h3>
+                {detailProduct.variant && (
+                  <p className="mt-2 text-sm text-slate-600">{detailProduct.variant}</p>
+                )}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Статус</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {detailProduct.is_in_transit
+                      ? 'В пути'
+                      : detailProduct.in_stock !== false
+                        ? 'В наличии'
+                        : 'Нет в наличии'}
+                  </p>
+                </div>
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Остаток</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {detailProductStockDisplay?.label}
+                  </p>
+                </div>
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Склад</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {detailProduct.location || '—'}
+                  </p>
+                </div>
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Мин. заказ</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {detailProductConfig?.sliderMin} кг
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Описание</p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-700">
+                  {detailProduct.description || detailProduct.origin || detailProduct.location || 'Информация отсутствует.'}
+                </p>
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Цены</p>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{detailPrimaryPriceLabel}</p>
+                      <p className="mt-1 text-xl font-bold text-brand-900">{formatCurrency(detailProductPricing.pricePerKg)}/кг</p>
+                    </div>
+                    <p className="text-xs text-slate-500">{detailSecondaryPriceLabel}: {formatCurrency(detailSecondaryPrice)}/кг</p>
+                  </div>
+                </div>
+                <QuantitySelector
+                  product={detailProduct}
+                  value={detailProductVolume}
+                  isB2B={isB2B}
+                  onChange={(nextVolume) => setProductVolume(detailProduct, nextVolume)}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    addToCart(detailProduct)
+                    setAnalyticsOpenId(null)
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
+                >
+                  <Plus className="h-4 w-4" aria-hidden />
+                  В корзину
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
