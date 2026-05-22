@@ -121,6 +121,22 @@ interface AdminOrder {
   items: AdminOrderItem[]
 }
 
+interface CreateAdminOrderItem {
+  productId: string
+  quantity: number
+}
+
+interface CreateAdminOrderForm {
+  customerName: string
+  customerPhone: string
+  orderType: OrderType
+  fulfillment: FulfillmentType
+  deliveryAddress: string
+  comment: string
+  staffNote: string
+  items: CreateAdminOrderItem[]
+}
+
 interface AdminClient {
   id: string
   name: string
@@ -2691,11 +2707,356 @@ function AdminPage() {
   const [staffNoteDraft, setStaffNoteDraft] = useState('')
   const [savingStaffNoteOrderId, setSavingStaffNoteOrderId] = useState<string | null>(null)
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
+  const [ordersSuccess, setOrdersSuccess] = useState<string | null>(null)
+  const [createOrderOpen, setCreateOrderOpen] = useState(false)
+  const [createOrderLoading, setCreateOrderLoading] = useState(false)
+  const [createOrderError, setCreateOrderError] = useState<string | null>(null)
+  const [createOrderForm, setCreateOrderForm] = useState<CreateAdminOrderForm>({
+    customerName: '',
+    customerPhone: '',
+    orderType: 'retail',
+    fulfillment: 'pickup',
+    deliveryAddress: '',
+    comment: '',
+    staffNote: '',
+    items: [],
+  })
+  const [availableProducts, setAvailableProducts] = useState<Product[]>([])
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [productsError, setProductsError] = useState<string | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState('')
+  const [selectedProductQuantity, setSelectedProductQuantity] = useState<number | ''>('')
   const [quickCalcPrice, setQuickCalcPrice] = useState('')
   const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
   const [mobileOrderFiltersOpen, setMobileOrderFiltersOpen] = useState(false)
   const [mobileReportFiltersOpen, setMobileReportFiltersOpen] = useState(false)
-  const ordersListRef = useRef<HTMLElement | null>(null)
+
+  const setCreateOrderFormField = <K extends keyof CreateAdminOrderForm>(
+    key: K,
+    value: CreateAdminOrderForm[K],
+  ) => {
+    setCreateOrderForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const resetCreateOrderForm = () => {
+    setCreateOrderError(null)
+    setCreateOrderForm({
+      customerName: '',
+      customerPhone: '',
+      orderType: 'retail',
+      fulfillment: 'pickup',
+      deliveryAddress: '',
+      comment: '',
+      staffNote: '',
+      items: [],
+    })
+    setSelectedProductQuantity('')
+    setSelectedProductId(availableProducts[0]?.id ?? '')
+  }
+
+  const normalizeQuantityInput = (value: string): number | '' => {
+    const onlyDigits = value.replace(/\D/g, '')
+    if (onlyDigits === '') {
+      return ''
+    }
+
+    const normalizedValue = onlyDigits.replace(/^0+(?=\d)/, '')
+    return Number(normalizedValue)
+  }
+
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow
+
+    if (createOrderOpen) {
+      document.body.style.overflow = 'hidden'
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+    }
+  }, [createOrderOpen])
+
+  const loadCreateOrderProducts = async () => {
+    setProductsLoading(true)
+    setProductsError(null)
+
+    try {
+      const products = await getProducts()
+      setAvailableProducts(products)
+      if (!selectedProductId && products.length > 0) {
+        setSelectedProductId(products[0].id)
+      }
+    } catch (error) {
+      setProductsError(getErrorMessage(error))
+    } finally {
+      setProductsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    void loadCreateOrderProducts()
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (availableProducts.length > 0 && !selectedProductId) {
+      setSelectedProductId(availableProducts[0].id)
+    }
+  }, [availableProducts, selectedProductId])
+
+  useEffect(() => {
+    if (!ordersSuccess) return
+    const timeout = window.setTimeout(() => setOrdersSuccess(null), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [ordersSuccess])
+
+  const getCreateOrderItemPrice = (product: Product) => {
+    if (createOrderForm.orderType === 'wholesale') {
+      return product.wholesale_price ?? product.basePrice
+    }
+    return product.retail_price ?? product.basePrice
+  }
+
+  const handleAddCreateOrderItem = () => {
+    if (!selectedProductId) {
+      setCreateOrderError('Выберите товар')
+      return
+    }
+
+    if (selectedProductQuantity === '' || selectedProductQuantity <= 0) {
+      setCreateOrderError('Введите количество больше 0.')
+      return
+    }
+
+    const productExists = availableProducts.some((product) => product.id === selectedProductId)
+    if (!productExists) {
+      setCreateOrderError('Товар не найден')
+      return
+    }
+
+    setCreateOrderForm((prev) => {
+      const existingIndex = prev.items.findIndex((item) => item.productId === selectedProductId)
+      if (existingIndex >= 0) {
+        return {
+          ...prev,
+          items: prev.items.map((item, index) =>
+            index === existingIndex
+              ? { ...item, quantity: item.quantity + selectedProductQuantity }
+              : item,
+          ),
+        }
+      }
+      return {
+        ...prev,
+        items: [...prev.items, { productId: selectedProductId, quantity: selectedProductQuantity }],
+      }
+    })
+    setCreateOrderError(null)
+    setSelectedProductQuantity('')
+  }
+
+  const removeCreateOrderItem = (productId: string) => {
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.productId !== productId),
+    }))
+  }
+
+  const createOrderItems = createOrderForm.items.map((item) => {
+    const product = availableProducts.find((product) => product.id === item.productId)
+    const pricePerKg = product ? getCreateOrderItemPrice(product) : 0
+    const quantity = Math.max(0, item.quantity)
+    return {
+      ...item,
+      quantity,
+      productName: product?.name ?? 'Товар',
+      price_per_kg: pricePerKg,
+      total_amount: pricePerKg * quantity,
+    }
+  })
+
+  const createOrderTotals = createOrderItems.reduce(
+    (acc, item) => ({
+      itemCount: acc.itemCount + 1,
+      totalWeight: acc.totalWeight + item.quantity,
+      totalAmount: acc.totalAmount + item.total_amount,
+    }),
+    { itemCount: 0, totalWeight: 0, totalAmount: 0 },
+  )
+
+  const selectedCreateOrderProduct = availableProducts.find(
+    (product) => product.id === selectedProductId,
+  )
+
+  const handleCreateAdminOrder = async () => {
+    setCreateOrderError(null)
+    setOrdersError(null)
+
+    const customerName = createOrderForm.customerName.trim()
+    const customerPhone = createOrderForm.customerPhone.trim()
+    const phone = normalizePhone(customerPhone)
+
+    if (!customerName) {
+      setCreateOrderError('Введите имя клиента')
+      return
+    }
+
+    if (!customerPhone) {
+      setCreateOrderError('Введите телефон')
+      return
+    }
+
+    if (!isValidNormalizedPhone(phone)) {
+      setCreateOrderError('Введите корректный телефон')
+      return
+    }
+
+    if (createOrderForm.items.length === 0) {
+      setCreateOrderError('Добавьте хотя бы один товар')
+      return
+    }
+
+    const invalidItem = createOrderForm.items.find((item) => item.quantity <= 0)
+    if (invalidItem) {
+      setCreateOrderError('Введите количество больше 0.')
+      return
+    }
+
+    const orderProducts = createOrderItems.filter((item) => item.price_per_kg > 0)
+    if (orderProducts.length !== createOrderForm.items.length) {
+      setCreateOrderError('Один из товаров недоступен')
+      return
+    }
+
+    const totalWeight = createOrderTotals.totalWeight
+    const totalAmount = createOrderTotals.totalAmount
+
+    setCreateOrderLoading(true)
+
+    try {
+      const clientType = CUSTOMER_TYPE_LABELS[createOrderForm.orderType]
+      const orderTypeLabel = ORDER_TYPE_LABELS[createOrderForm.orderType]
+      const receivingType = FULFILLMENT_LABELS[createOrderForm.fulfillment]
+      const deliveryAddress =
+        createOrderForm.fulfillment === 'delivery'
+          ? createOrderForm.deliveryAddress.trim() || null
+          : null
+
+      const { data: clientData, error: clientError } = await supabase
+        .from('clients')
+        .upsert(
+          {
+            name: customerName,
+            phone,
+            client_type: clientType,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'phone' },
+        )
+        .select('id')
+        .single()
+
+      if (clientError) throw clientError
+      if (!clientData?.id) throw new Error('Не удалось получить id клиента')
+
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          client_id: clientData.id,
+          customer_name: customerName,
+          customer_phone: phone,
+          client_type: clientType,
+          order_type: orderTypeLabel,
+          receiving_type: receivingType,
+          delivery_address: deliveryAddress,
+          comment: createOrderForm.comment.trim() || null,
+          staff_note: createOrderForm.staffNote.trim() || null,
+          total_weight_kg: totalWeight,
+          total_amount: totalAmount,
+          status: 'new',
+          archived_at: null,
+        })
+        .select('*')
+        .single()
+
+      if (orderError) throw orderError
+      if (!orderData?.id) throw new Error('Не удалось создать заказ')
+
+      const orderItemsPayload = createOrderItems.map((item) => ({
+        order_id: orderData.id,
+        product_id: toNumber(item.productId),
+        product_name: item.productName,
+        quantity_kg: item.quantity,
+        price_per_kg: item.price_per_kg,
+        total_amount: item.total_amount,
+      }))
+
+      const { data: insertedItems, error: itemsError } = await supabase
+        .from('order_items')
+        .insert(orderItemsPayload)
+        .select('*')
+
+      if (itemsError) {
+        await supabase.from('orders').delete().eq('id', orderData.id)
+        throw itemsError
+      }
+
+      const newOrder: AdminOrder = {
+        id: String(orderData.id),
+        client_id: String(clientData.id),
+        customer_name: customerName,
+        customer_phone: phone,
+        client_type: clientType,
+        order_type: orderTypeLabel,
+        receiving_type: receivingType,
+        delivery_address: deliveryAddress,
+        comment: createOrderForm.comment.trim() || null,
+        total_weight_kg: totalWeight,
+        total_amount: totalAmount,
+        status: 'new',
+        staff_note: createOrderForm.staffNote.trim() || null,
+        archived_at: null,
+        created_at: String(orderData.created_at ?? new Date().toISOString()),
+        items: (insertedItems ?? []).map((item) => ({
+          id: String(item.id),
+          order_id: String(item.order_id),
+          product_id:
+            item.product_id === null || item.product_id === undefined
+              ? null
+              : String(item.product_id) === ''
+              ? null
+              : toNumber(item.product_id),
+          product_name: String(item.product_name ?? 'Товар'),
+          quantity_kg: toNumber(item.quantity_kg),
+          price_per_kg: toNumber(item.price_per_kg),
+          total_amount: toNumber(item.total_amount),
+          created_at: typeof item.created_at === 'string' ? item.created_at : null,
+        })),
+      }
+
+      setOrders((prev) => [newOrder, ...prev])
+      setOrdersSuccess('Заказ создан')
+      resetCreateOrderForm()
+      setCreateOrderOpen(false)
+    } catch (error) {
+      setCreateOrderError(getErrorMessage(error))
+    } finally {
+      setCreateOrderLoading(false)
+    }
+  }
+
+  const handleCreateOrderButton = () => {
+    setOrdersError(null)
+    setOrdersSuccess(null)
+    setCreateOrderError(null)
+    resetCreateOrderForm()
+    setCreateOrderOpen(true)
+  }
+
+  const handleCloseCreateOrder = () => {
+    setCreateOrderOpen(false)
+    setCreateOrderError(null)
+  }
 
   const loadAdminOrders = async () => {
     setOrdersLoading(true)
@@ -3525,6 +3886,227 @@ function AdminPage() {
           </div>
         </header>
 
+        {createOrderOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 overscroll-contain">
+            <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl max-h-[calc(100vh-32px)]">
+              <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Создать заказ вручную</h2>
+                  <p className="text-sm text-slate-500">Заполните данные клиента и добавьте товары.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseCreateOrder}
+                  className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  aria-label="Закрыть окно создания заказа"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="overflow-y-auto px-5 py-5 sm:px-6" style={{ maxHeight: 'calc(100vh - 160px)' }}>
+                {(createOrderError || productsError) && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                    {createOrderError || productsError}
+                  </div>
+                )}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Имя клиента</span>
+                    <input
+                      type="text"
+                      value={createOrderForm.customerName}
+                      onChange={(event) => setCreateOrderFormField('customerName', event.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Телефон</span>
+                    <input
+                      type="text"
+                      value={createOrderForm.customerPhone}
+                      onChange={(event) => setCreateOrderFormField('customerPhone', event.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      placeholder="77712345678"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Тип заказа</span>
+                    <select
+                      value={createOrderForm.orderType}
+                      onChange={(event) => setCreateOrderFormField('orderType', event.target.value as OrderType)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    >
+                      <option value="retail">Розничный</option>
+                      <option value="wholesale">Оптовый</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Способ получения</span>
+                    <select
+                      value={createOrderForm.fulfillment}
+                      onChange={(event) => setCreateOrderFormField('fulfillment', event.target.value as FulfillmentType)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    >
+                      <option value="pickup">Самовывоз</option>
+                      <option value="delivery">Доставка</option>
+                    </select>
+                  </label>
+                  {createOrderForm.fulfillment === 'delivery' ? (
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Адрес доставки</span>
+                      <input
+                        type="text"
+                        value={createOrderForm.deliveryAddress}
+                        onChange={(event) => setCreateOrderFormField('deliveryAddress', event.target.value)}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+                <div className="grid gap-4 lg:grid-cols-[1.4fr_auto]">
+                  <div className="grid gap-4">
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Товар</span>
+                      <select
+                        value={selectedProductId}
+                        onChange={(event) => setSelectedProductId(event.target.value)}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      >
+                        {availableProducts.map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Количество (кг)</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        min={1}
+                        step={1}
+                        value={selectedProductQuantity === '' ? '' : selectedProductQuantity}
+                        placeholder="Например: 25"
+                        onKeyDown={(event) => {
+                          if (['-', '+', '.', ',', 'e', 'E'].includes(event.key)) {
+                            event.preventDefault()
+                          }
+                        }}
+                        onChange={(event) => setSelectedProductQuantity(normalizeQuantityInput(event.target.value))}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      />
+                    </label>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Текущая цена</p>
+                    <p className="mt-2 text-xl font-bold text-slate-900">
+                      {selectedCreateOrderProduct ? `${formatCurrency(getCreateOrderItemPrice(selectedCreateOrderProduct))}/кг` : 'Выберите товар'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAddCreateOrderItem}
+                      className="mt-4 w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
+                      disabled={!selectedProductId}
+                    >
+                      Добавить товар
+                    </button>
+                  </div>
+                </div>
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900">Товары в заказе</h3>
+                    <span className="text-sm text-slate-500">{createOrderTotals.itemCount} поз.</span>
+                  </div>
+                  {createOrderItems.length === 0 ? (
+                    <p className="text-sm text-slate-500">Товары пока не добавлены.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {createOrderItems.map((item) => (
+                        <li key={item.productId} className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3 shadow-sm">
+                          <div>
+                            <p className="font-semibold text-slate-900">{item.productName}</p>
+                            <p className="text-sm text-slate-500">
+                              {item.quantity} кг × {formatCurrency(item.price_per_kg)}/кг
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-right font-bold text-slate-900">{formatCurrency(item.total_amount)}</p>
+                            <button
+                              type="button"
+                              onClick={() => removeCreateOrderItem(item.productId)}
+                              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50"
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Всего позиций</p>
+                    <p className="mt-2 text-lg font-bold text-slate-900">{createOrderTotals.itemCount}</p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Общий вес</p>
+                    <p className="mt-2 text-lg font-bold text-slate-900">{createOrderTotals.totalWeight} кг</p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Итог</p>
+                    <p className="mt-2 text-lg font-bold text-slate-900">{formatCurrency(createOrderTotals.totalAmount)}</p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Комментарий клиента</span>
+                    <textarea
+                      value={createOrderForm.comment}
+                      onChange={(event) => setCreateOrderFormField('comment', event.target.value)}
+                      className="mt-2 h-28 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Заметка работника</span>
+                    <textarea
+                      value={createOrderForm.staffNote}
+                      onChange={(event) => setCreateOrderFormField('staffNote', event.target.value)}
+                      className="mt-2 h-28 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm text-slate-500">Проверьте данные перед сохранением</p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={handleCloseCreateOrder}
+                      className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCreateAdminOrder}
+                      disabled={createOrderLoading}
+                      className="rounded-2xl bg-brand-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      {createOrderLoading ? 'Сохраняем...' : 'Создать заказ'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <section className="mb-5 grid gap-4 xl:grid-cols-2">
           <div className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70 sm:p-5 xl:col-span-2">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -3846,18 +4428,29 @@ function AdminPage() {
           </div>
         </section>
 
-        <div className="mb-4 sm:hidden">
+        <div className="mb-3 flex items-center justify-between gap-3 sm:hidden">
+          <p className="text-sm font-semibold text-slate-700">Найдено заказов: {filteredOrders.length}</p>
           <button
             type="button"
-            onClick={() =>
-              ordersListRef.current?.scrollIntoView({
-                behavior: 'smooth',
-                block: 'start',
-              })
-            }
-            className="w-full rounded-xl bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800"
+            onClick={handleCreateOrderButton}
+            disabled={productsLoading || availableProducts.length === 0}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand-700 px-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            К заказам
+            <Plus className="h-4 w-4" />
+            Создать
+          </button>
+        </div>
+
+        <div className="mb-4 hidden rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/60 sm:flex sm:items-center sm:justify-between sm:gap-4">
+          <p className="text-sm text-slate-600">Найдено заказов: {filteredOrders.length}</p>
+          <button
+            type="button"
+            onClick={handleCreateOrderButton}
+            disabled={productsLoading || availableProducts.length === 0}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+          >
+            <Plus className="h-4 w-4" />
+            Создать заказ
           </button>
         </div>
 
@@ -3876,7 +4469,7 @@ function AdminPage() {
             Заказов по выбранному фильтру нет.
           </div>
         ) : (
-          <main ref={ordersListRef} className="scroll-mt-4 grid gap-4 xl:grid-cols-2">
+          <main className="grid gap-4 xl:grid-cols-2">
             {filteredOrders.map((order) => (
               <article
                 key={order.id}
