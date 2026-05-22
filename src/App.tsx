@@ -1,4 +1,5 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Session, User } from '@supabase/supabase-js'
 import {
   ArrowUpDown,
   Archive,
@@ -50,6 +51,7 @@ type AdminPeriodPreset =
   | 'custom'
   | 'all'
 type Cart = Record<string, number>
+type AdminRole = 'owner' | 'worker'
 
 interface CartLine {
   product: Product
@@ -157,6 +159,13 @@ interface AdminClientStats {
   lastOrderAt: string | null
 }
 
+interface AdminProfile {
+  id: string
+  email: string
+  role: AdminRole
+  created_at?: string | null
+}
+
 interface AdminProduct {
   id: string
   name: string
@@ -188,9 +197,6 @@ type AdminProductForm = Omit<AdminProduct, 'id' | 'image'> & {
 
 const LOCAL_STORAGE_LAST_ORDER = 'last_vegetable_order'
 const LOCAL_STORAGE_HISTORY = 'order_history'
-const ADMIN_AUTH_STORAGE_KEY = 'adminAuthenticated'
-const LEGACY_ADMIN_AUTH_STORAGE_KEY = 'uralsk_admin_auth'
-const ADMIN_PASSWORD = 'VegAdmin_2026!'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 1
 const WHOLESALE_MIN_ORDER_KG = 25
@@ -1587,7 +1593,7 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
   ].join('\n')
 }
 
-function AdminClientsPanel() {
+function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: boolean }) {
   const [clients, setClients] = useState<AdminClient[]>([])
   const [clientStats, setClientStats] = useState<Record<string, AdminClientStats>>({})
   const [loading, setLoading] = useState(false)
@@ -1740,6 +1746,11 @@ function AdminClientsPanel() {
   }
 
   const deleteClient = async (client: AdminClient) => {
+    if (!canDeleteClients) {
+      setError('Нет доступа к удалению клиентов.')
+      return
+    }
+
     const stats = clientStats[client.id] ?? {
       orderCount: 0,
       totalAmount: 0,
@@ -1957,7 +1968,7 @@ function AdminClientsPanel() {
                 >
                   WhatsApp
                 </a>
-                {canDeleteClient ? (
+                {canDeleteClients && canDeleteClient ? (
                   <button
                     type="button"
                     onClick={() => void deleteClient(client)}
@@ -1966,11 +1977,11 @@ function AdminClientsPanel() {
                   >
                     {deletingClientId === client.id ? 'Удаляем...' : 'Удалить клиента'}
                   </button>
-                ) : (
+                ) : canDeleteClients ? (
                   <p className="mt-2 text-xs font-medium text-slate-500">
                     Нельзя удалить клиента с заказами.
                   </p>
-                )}
+                ) : null}
               </article>
             )
           })}
@@ -1980,7 +1991,7 @@ function AdminClientsPanel() {
   )
 }
 
-function AdminProductsPanel() {
+function AdminProductsPanel({ canManageProducts = true }: { canManageProducts?: boolean }) {
   const productFormRef = useRef<HTMLFormElement | null>(null)
   const [products, setProducts] = useState<AdminProduct[]>([])
   const [loading, setLoading] = useState(false)
@@ -2069,6 +2080,8 @@ function AdminProductsPanel() {
   }, [categoryFilter, onlyInStock, onlyLowStock, onlyTransit, products, search])
 
   const startCreate = () => {
+    if (!canManageProducts) return
+
     setForm(emptyAdminProductForm)
     setEditingId(null)
     setFormMode('create')
@@ -2078,6 +2091,8 @@ function AdminProductsPanel() {
   }
 
   const startEdit = (product: AdminProduct) => {
+    if (!canManageProducts) return
+
     setForm(adminProductToForm(product))
     setEditingId(product.id)
     setFormMode('edit')
@@ -2111,6 +2126,8 @@ function AdminProductsPanel() {
 
   const saveProduct = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!canManageProducts) return
+
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -2158,6 +2175,8 @@ function AdminProductsPanel() {
   }
 
   const uploadProductImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!canManageProducts) return
+
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
@@ -2255,6 +2274,8 @@ function AdminProductsPanel() {
   }
 
   const toggleProductActive = async (product: AdminProduct) => {
+    if (!canManageProducts) return
+
     setVisibilityUpdatingId(product.id)
     setError(null)
     setSuccess(null)
@@ -2288,6 +2309,8 @@ function AdminProductsPanel() {
     patch: Partial<Pick<AdminProduct, 'stock_amount' | 'in_stock' | 'is_in_transit'>>,
     message: string,
   ) => {
+    if (!canManageProducts) return
+
     setQuickUpdatingProductId(product.id)
     setError(null)
     setSuccess(null)
@@ -2367,6 +2390,7 @@ function AdminProductsPanel() {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Обновить
             </button>
+            {canManageProducts && (
             <button
               type="button"
               onClick={startCreate}
@@ -2375,6 +2399,7 @@ function AdminProductsPanel() {
               <Plus className="h-4 w-4" />
               Добавить товар
             </button>
+            )}
           </div>
         </div>
 
@@ -2442,7 +2467,7 @@ function AdminProductsPanel() {
         </div>
       )}
 
-      {formMode && (
+      {canManageProducts && formMode && (
         <form
           ref={productFormRef}
           onSubmit={saveProduct}
@@ -2703,6 +2728,7 @@ function AdminProductsPanel() {
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">Откуда товар</dt><dd className="font-semibold text-slate-800">{product.origin || '-'}</dd></div>
                     </dl>
                     {product.description && <p className="mt-3 text-sm text-slate-600">{product.description}</p>}
+                    {canManageProducts && (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-bold text-slate-800">Быстрые действия</p>
@@ -2775,6 +2801,8 @@ function AdminProductsPanel() {
                         </div>
                       </div>
                     </div>
+                    )}
+                    {canManageProducts && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button type="button" onClick={() => startEdit(product)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100">
                         Редактировать
@@ -2788,6 +2816,7 @@ function AdminProductsPanel() {
                         {product.is_active ? 'Скрыть товар' : 'Показать товар'}
                       </button>
                     </div>
+                    )}
                   </div>
               </article>
             )
@@ -2799,10 +2828,14 @@ function AdminProductsPanel() {
 }
 
 function AdminPage() {
+  const [adminSession, setAdminSession] = useState<Session | null>(null)
+  const [adminUser, setAdminUser] = useState<User | null>(null)
+  const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null)
+  const [adminAuthLoading, setAdminAuthLoading] = useState(true)
+  const [adminProfileLoading, setAdminProfileLoading] = useState(false)
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => sessionStorage.getItem(ADMIN_AUTH_STORAGE_KEY) === 'true',
-  )
+  const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('orders')
   const [orders, setOrders] = useState<AdminOrder[]>([])
@@ -2851,6 +2884,9 @@ function AdminPage() {
   const [quickCalcQuantity, setQuickCalcQuantity] = useState('')
   const [mobileOrderFiltersOpen, setMobileOrderFiltersOpen] = useState(false)
   const [mobileReportFiltersOpen, setMobileReportFiltersOpen] = useState(false)
+  const isAdminAuthenticated = Boolean(adminSession && adminProfile)
+  const adminRole = adminProfile?.role ?? null
+  const isOwner = adminRole === 'owner'
 
   const setCreateOrderFormField = <K extends keyof CreateAdminOrderForm>(
     key: K,
@@ -2858,6 +2894,94 @@ function AdminPage() {
   ) => {
     setCreateOrderForm((prev) => ({ ...prev, [key]: value }))
   }
+
+  const loadAdminProfile = useCallback(async (user: User) => {
+    setAdminProfileLoading(true)
+    setLoginError(null)
+
+    try {
+      const { data, error } = await supabase
+        .from('admin_profiles')
+        .select('id, email, role, created_at')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (error) throw error
+
+      if (!data) {
+        setAdminProfile(null)
+        setLoginError('Нет доступа к админке')
+        return
+      }
+
+      setAdminProfile({
+        id: String(data.id),
+        email: String(data.email),
+        role: data.role === 'owner' ? 'owner' : 'worker',
+        created_at: typeof data.created_at === 'string' ? data.created_at : null,
+      })
+    } catch (error) {
+      setAdminProfile(null)
+      setLoginError(`Не удалось загрузить профиль админки: ${getErrorMessage(error)}`)
+    } finally {
+      setAdminProfileLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadCurrentSession = async () => {
+      setAdminAuthLoading(true)
+      const { data, error } = await supabase.auth.getSession()
+
+      if (!isMounted) return
+
+      if (error) {
+        setLoginError(`Не удалось проверить вход: ${getErrorMessage(error)}`)
+        setAdminSession(null)
+        setAdminUser(null)
+        setAdminProfile(null)
+        setAdminAuthLoading(false)
+        return
+      }
+
+      const session = data.session
+      setAdminSession(session)
+      setAdminUser(session?.user ?? null)
+
+      if (session?.user) {
+        await loadAdminProfile(session.user)
+      } else {
+        setAdminProfile(null)
+      }
+
+      if (isMounted) {
+        setAdminAuthLoading(false)
+      }
+    }
+
+    void loadCurrentSession()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAdminSession(session)
+      setAdminUser(session?.user ?? null)
+
+      if (session?.user) {
+        void loadAdminProfile(session.user)
+      } else {
+        setAdminProfile(null)
+        setLoginError(null)
+      }
+    })
+
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
+  }, [loadAdminProfile])
 
   const resetCreateOrderForm = () => {
     setCreateOrderError(null)
@@ -2915,9 +3039,9 @@ function AdminPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAdminAuthenticated) return
     void loadCreateOrderProducts()
-  }, [isAuthenticated])
+  }, [isAdminAuthenticated])
 
   useEffect(() => {
     if (availableProducts.length > 0 && !selectedProductId) {
@@ -3170,6 +3294,8 @@ function AdminPage() {
   }
 
   const handleCreateOrderButton = () => {
+    if (!isOwner) return
+
     setOrdersError(null)
     setOrdersSuccess(null)
     setCreateOrderError(null)
@@ -3251,10 +3377,10 @@ function AdminPage() {
   }
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAdminAuthenticated) {
       void loadAdminOrders()
     }
-  }, [isAuthenticated, showArchivedOrders])
+  }, [isAdminAuthenticated, showArchivedOrders])
 
   const filteredOrders = useMemo(() => {
     const query = adminSearchQuery.trim().toLowerCase()
@@ -3518,6 +3644,11 @@ function AdminPage() {
   }
 
   const downloadExcelReport = async () => {
+    if (!isOwner) {
+      setOrdersError('Нет доступа к скачиванию полного Excel-отчёта.')
+      return
+    }
+
     type ExcelValue = string | number | null
     type ExcelRow = Record<string, ExcelValue>
     type AddSheetOptions = {
@@ -3924,23 +4055,40 @@ function AdminPage() {
     }
   }
 
-  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (password !== ADMIN_PASSWORD) {
-      setLoginError('Неверный пароль')
+    if (!email.trim() || !password) {
+      setLoginError('Введите email и пароль')
       return
     }
 
-    sessionStorage.setItem(ADMIN_AUTH_STORAGE_KEY, 'true')
-    sessionStorage.removeItem(LEGACY_ADMIN_AUTH_STORAGE_KEY)
-    setIsAuthenticated(true)
+    setLoginLoading(true)
     setLoginError(null)
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+
+    if (error) {
+      setLoginError(`Не удалось войти в админку: ${getErrorMessage(error)}`)
+      setLoginLoading(false)
+      return
+    }
+
+    setAdminSession(data.session)
+    setAdminUser(data.user)
+    if (data.user) {
+      await loadAdminProfile(data.user)
+    }
+    setLoginLoading(false)
   }
 
-  const handleLogout = () => {
-    sessionStorage.removeItem(ADMIN_AUTH_STORAGE_KEY)
-    sessionStorage.removeItem(LEGACY_ADMIN_AUTH_STORAGE_KEY)
-    setIsAuthenticated(false)
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setAdminSession(null)
+    setAdminUser(null)
+    setAdminProfile(null)
+    setEmail('')
     setPassword('')
     setActiveAdminTab('orders')
     setOrders([])
@@ -3982,6 +4130,11 @@ function AdminPage() {
   }
 
   const archiveOrder = async (orderId: string) => {
+    if (!isOwner) {
+      setOrdersError('Нет доступа к архивированию заказов.')
+      return
+    }
+
     setArchivingOrderId(orderId)
     setOrdersError(null)
 
@@ -4037,6 +4190,11 @@ function AdminPage() {
   }
 
   const restoreOrder = async (orderId: string) => {
+    if (!isOwner) {
+      setOrdersError('Нет доступа к восстановлению архивных заказов.')
+      return
+    }
+
     setArchivingOrderId(orderId)
     setOrdersError(null)
 
@@ -4091,6 +4249,11 @@ function AdminPage() {
   }
 
   const deleteArchivedOrderForever = async (orderId: string) => {
+    if (!isOwner) {
+      setOrdersError('Нет доступа к удалению архивных заказов.')
+      return
+    }
+
     const confirmed = window.confirm('Удалить заказ навсегда? Это действие нельзя отменить.')
     if (!confirmed) return
 
@@ -4202,7 +4365,48 @@ function AdminPage() {
     }
   }
 
-  if (!isAuthenticated) {
+  if (adminAuthLoading || adminProfileLoading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">
+        <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center text-sm font-bold text-slate-600 shadow-xl shadow-slate-200/70">
+          Проверяем доступ к админке...
+        </div>
+      </div>
+    )
+  }
+
+  if (adminSession && !adminProfile) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">
+        <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/70">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-700">
+              <Lock className="h-5 w-5" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-brand-900">Нет доступа</h1>
+              <p className="text-sm text-slate-500">Нет доступа к админке</p>
+            </div>
+          </div>
+          {adminUser?.email && (
+            <p className="mb-4 rounded-xl bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+              {adminUser.email}
+            </p>
+          )}
+          {loginError && <p className="mb-4 text-sm font-medium text-red-600">{loginError}</p>}
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="w-full rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800 active:scale-[0.98]"
+          >
+            Выйти
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAdminAuthenticated) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">
         <form
@@ -4219,6 +4423,21 @@ function AdminPage() {
             </div>
           </div>
           <label className="block">
+            <span className="text-sm font-semibold text-slate-700">Email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                setLoginError(null)
+              }}
+              className="mt-1 mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+              placeholder="Email"
+              autoComplete="email"
+              autoFocus
+            />
+          </label>
+          <label className="mt-3 block">
             <span className="text-sm font-semibold text-slate-700">Пароль</span>
             <input
               type="password"
@@ -4228,15 +4447,17 @@ function AdminPage() {
                 setLoginError(null)
               }}
               className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-              autoFocus
+              placeholder="Пароль"
+              autoComplete="current-password"
             />
           </label>
           {loginError && <p className="mt-2 text-sm font-medium text-red-600">{loginError}</p>}
           <button
             type="submit"
-            className="mt-5 w-full rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800 active:scale-[0.98]"
+            disabled={loginLoading}
+            className="mt-5 w-full rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
           >
-            Войти
+            {loginLoading ? 'Входим...' : 'Войти в админку'}
           </button>
         </form>
       </div>
@@ -4261,6 +4482,19 @@ function AdminPage() {
               {tab.label}
             </button>
           ))}
+          <div className="ml-auto flex items-center gap-2 px-2">
+            <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-500 sm:inline">
+              {adminProfile?.email} · {adminRole}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+            >
+              <LogOut className="h-4 w-4" />
+              Выйти
+            </button>
+          </div>
         </nav>
 
         {activeAdminTab === 'orders' ? (
@@ -4838,6 +5072,7 @@ function AdminPage() {
                   >
                     {reportCopied ? 'Отчёт скопирован' : 'Скопировать отчёт'}
                   </button>
+                  {isOwner && (
                   <button
                     type="button"
                     onClick={() => void downloadExcelReport()}
@@ -4846,6 +5081,7 @@ function AdminPage() {
                     <Download className="h-4 w-4" />
                     Скачать отчёт
                   </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -5031,6 +5267,7 @@ function AdminPage() {
 
         <div className="mb-3 flex items-center justify-between gap-3 sm:hidden">
           <p className="text-sm font-semibold text-slate-700">Найдено заказов: {filteredOrders.length}</p>
+          {isOwner && (
           <button
             type="button"
             onClick={handleCreateOrderButton}
@@ -5040,19 +5277,22 @@ function AdminPage() {
             <Plus className="h-4 w-4" />
             Создать
           </button>
+          )}
         </div>
 
         <div className="mb-4 hidden rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/60 sm:flex sm:items-center sm:justify-between sm:gap-4">
           <p className="text-sm text-slate-600">Найдено заказов: {filteredOrders.length}</p>
-          <button
-            type="button"
-            onClick={handleCreateOrderButton}
-            disabled={productsLoading || availableProducts.length === 0}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-          >
-            <Plus className="h-4 w-4" />
-            Создать заказ
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={handleCreateOrderButton}
+              disabled={productsLoading || availableProducts.length === 0}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+            >
+              <Plus className="h-4 w-4" />
+              Создать заказ
+            </button>
+          )}
         </div>
 
         {ordersError && (
@@ -5141,7 +5381,7 @@ function AdminPage() {
                     >
                       {copiedOrderId === order.id ? 'Скопировано' : 'Скопировать заказ'}
                     </button>
-                    {order.archived_at ? (
+                    {isOwner && (order.archived_at ? (
                       <>
                         <button
                           type="button"
@@ -5176,7 +5416,7 @@ function AdminPage() {
                           В архив
                         </button>
                       )
-                    )}
+                    ))}
                   </div>
 
                   <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
@@ -5338,9 +5578,9 @@ function AdminPage() {
         )}
           </>
         ) : activeAdminTab === 'products' ? (
-          <AdminProductsPanel />
+          <AdminProductsPanel canManageProducts={isOwner} />
         ) : (
-          <AdminClientsPanel />
+          <AdminClientsPanel canDeleteClients={isOwner} />
         )}
       </div>
     </div>
@@ -5369,6 +5609,14 @@ export default function App() {
   const dragStartYRef = useRef<number | null>(null)
   const [cartDragOffset, setCartDragOffset] = useState(0)
   const [isCartDragging, setIsCartDragging] = useState(false)
+  const productDetailsSheetRef = useRef<HTMLDivElement | null>(null)
+  const productDetailsDragStartYRef = useRef<number | null>(null)
+  const [productDetailsDragOffset, setProductDetailsDragOffset] = useState(0)
+  const [isProductDetailsDragging, setIsProductDetailsDragging] = useState(false)
+  const clientOrdersSheetRef = useRef<HTMLDivElement | null>(null)
+  const clientOrdersDragStartYRef = useRef<number | null>(null)
+  const [clientOrdersDragOffset, setClientOrdersDragOffset] = useState(0)
+  const [isClientOrdersDragging, setIsClientOrdersDragging] = useState(false)
   const [cartError, setCartError] = useState<string | null>(null)
   const [repeatedOrderId, setRepeatedOrderId] = useState<string | null>(null)
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
@@ -5445,6 +5693,84 @@ export default function App() {
 
   const handleCartTouchCancel = () => resetCartDrag()
 
+  const handleProductDetailsTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    productDetailsDragStartYRef.current = event.touches[0].clientY
+    setIsProductDetailsDragging(true)
+  }
+
+  const handleProductDetailsTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (productDetailsDragStartYRef.current === null) return
+
+    const deltaY = event.touches[0].clientY - productDetailsDragStartYRef.current
+
+    if (deltaY <= 0) {
+      setProductDetailsDragOffset(0)
+      return
+    }
+
+    setProductDetailsDragOffset(Math.min(deltaY, 240))
+  }
+
+  const resetProductDetailsDrag = () => {
+    productDetailsDragStartYRef.current = null
+    setProductDetailsDragOffset(0)
+    setIsProductDetailsDragging(false)
+  }
+
+  const handleProductDetailsTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (productDetailsDragStartYRef.current === null) return
+
+    const endY = event.changedTouches[0].clientY
+    const deltaY = endY - productDetailsDragStartYRef.current
+    const shouldClose = deltaY > 100
+
+    resetProductDetailsDrag()
+    if (shouldClose) {
+      setAnalyticsOpenId(null)
+    }
+  }
+
+  const handleProductDetailsTouchCancel = () => resetProductDetailsDrag()
+
+  const handleClientOrdersTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    clientOrdersDragStartYRef.current = event.touches[0].clientY
+    setIsClientOrdersDragging(true)
+  }
+
+  const handleClientOrdersTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (clientOrdersDragStartYRef.current === null) return
+
+    const deltaY = event.touches[0].clientY - clientOrdersDragStartYRef.current
+
+    if (deltaY <= 0) {
+      setClientOrdersDragOffset(0)
+      return
+    }
+
+    setClientOrdersDragOffset(Math.min(deltaY, 240))
+  }
+
+  const resetClientOrdersDrag = () => {
+    clientOrdersDragStartYRef.current = null
+    setClientOrdersDragOffset(0)
+    setIsClientOrdersDragging(false)
+  }
+
+  const handleClientOrdersTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (clientOrdersDragStartYRef.current === null) return
+
+    const endY = event.changedTouches[0].clientY
+    const deltaY = endY - clientOrdersDragStartYRef.current
+    const shouldClose = deltaY > 100
+
+    resetClientOrdersDrag()
+    if (shouldClose) {
+      setClientOrdersOpen(false)
+    }
+  }
+
+  const handleClientOrdersTouchCancel = () => resetClientOrdersDrag()
+
   useEffect(() => {
     if (!cartOpen) return
 
@@ -5478,6 +5804,76 @@ export default function App() {
       }
     }
   }, [cartOpen])
+
+  useEffect(() => {
+    if (!analyticsOpenId) return
+
+    const originalOverflow = document.body.style.overflow
+    const originalTouchAction = document.body.style.touchAction
+    const element = productDetailsSheetRef.current
+
+    const handleNativeTouchMove = (event: TouchEvent) => {
+      if (productDetailsDragStartYRef.current === null) return
+      const deltaY = event.touches[0]?.clientY - productDetailsDragStartYRef.current
+      if (deltaY > 0) {
+        event.preventDefault()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+
+    if (element) {
+      element.addEventListener('touchmove', handleNativeTouchMove, {
+        passive: false,
+      })
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+      document.body.style.touchAction = originalTouchAction
+      resetProductDetailsDrag()
+
+      if (element) {
+        element.removeEventListener('touchmove', handleNativeTouchMove)
+      }
+    }
+  }, [analyticsOpenId])
+
+  useEffect(() => {
+    if (!clientOrdersOpen) return
+
+    const originalOverflow = document.body.style.overflow
+    const originalTouchAction = document.body.style.touchAction
+    const element = clientOrdersSheetRef.current
+
+    const handleNativeTouchMove = (event: TouchEvent) => {
+      if (clientOrdersDragStartYRef.current === null) return
+      const deltaY = event.touches[0]?.clientY - clientOrdersDragStartYRef.current
+      if (deltaY > 0) {
+        event.preventDefault()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+
+    if (element) {
+      element.addEventListener('touchmove', handleNativeTouchMove, {
+        passive: false,
+      })
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+      document.body.style.touchAction = originalTouchAction
+      resetClientOrdersDrag()
+
+      if (element) {
+        element.removeEventListener('touchmove', handleNativeTouchMove)
+      }
+    }
+  }, [clientOrdersOpen])
 
   useEffect(() => {
     if (!cartOpen) {
@@ -6970,17 +7366,36 @@ export default function App() {
 
       {analyticsOpenId && detailProduct && (
         <div
-          className="fixed inset-0 z-[55] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+          className="fixed inset-0 z-[55] flex items-end justify-center bg-black/50 p-4 overscroll-contain backdrop-blur-[2px] sm:items-center"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-details-title"
           onClick={() => setAnalyticsOpenId(null)}
         >
           <div
-            className="w-full max-w-lg overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            ref={productDetailsSheetRef}
+            className="flex max-h-[min(90dvh,760px)] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            style={
+              productDetailsDragOffset > 0 || isProductDetailsDragging
+                ? {
+                    transform: `translateY(${productDetailsDragOffset}px)`,
+                    transition: isProductDetailsDragging ? 'none' : 'transform 180ms ease-out',
+                    touchAction: 'pan-y',
+                  }
+                : { touchAction: 'pan-y' }
+            }
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="relative h-44 overflow-hidden bg-slate-100">
+            <div
+              className="flex flex-col"
+              onTouchStart={handleProductDetailsTouchStart}
+              onTouchMove={handleProductDetailsTouchMove}
+              onTouchEnd={handleProductDetailsTouchEnd}
+              onTouchCancel={handleProductDetailsTouchCancel}
+            >
+              <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-200 cursor-grab active:cursor-grabbing" aria-hidden />
+            </div>
+            <div className="relative h-44 shrink-0 overflow-hidden bg-slate-100">
               <ProductImage
                 src={detailProduct.image_url || detailProduct.image}
                 alt={detailProduct.name}
@@ -6997,7 +7412,10 @@ export default function App() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4 p-5">
+            <div
+              className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-5"
+              style={{ WebkitOverflowScrolling: 'touch' }}
+            >
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
                   {detailProduct.category ?? detailProduct.subtitle}
@@ -7135,17 +7553,35 @@ export default function App() {
 
       {clientOrdersOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 overscroll-contain backdrop-blur-[2px] sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="client-orders-title"
           onClick={() => setClientOrdersOpen(false)}
         >
           <div
-            className="max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            ref={clientOrdersSheetRef}
+            className="flex max-h-[min(90dvh,760px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            style={
+              clientOrdersDragOffset > 0 || isClientOrdersDragging
+                ? {
+                    transform: `translateY(${clientOrdersDragOffset}px)`,
+                    transition: isClientOrdersDragging ? 'none' : 'transform 180ms ease-out',
+                    touchAction: 'pan-y',
+                  }
+                : { touchAction: 'pan-y' }
+            }
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white px-5 py-4">
+            <div
+              className="shrink-0"
+              onTouchStart={handleClientOrdersTouchStart}
+              onTouchMove={handleClientOrdersTouchMove}
+              onTouchEnd={handleClientOrdersTouchEnd}
+              onTouchCancel={handleClientOrdersTouchCancel}
+            >
+              <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-200 cursor-grab active:cursor-grabbing" aria-hidden />
+            <div className="flex items-start justify-between border-b border-slate-100 bg-white px-5 pb-4 pt-3">
               <div>
                 <h3 id="client-orders-title" className="text-xl font-bold text-brand-900">
                   Мои заказы
@@ -7163,8 +7599,12 @@ export default function App() {
                 <X className="h-5 w-5" />
               </button>
             </div>
+            </div>
 
-            <div className="space-y-4 p-5">
+            <div
+              className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-5"
+              style={{ WebkitOverflowScrolling: 'touch' }}
+            >
               <button
                 type="button"
                 onClick={() => void loadClientOrders()}

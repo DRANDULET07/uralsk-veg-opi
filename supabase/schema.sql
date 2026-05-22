@@ -44,6 +44,47 @@ ALTER TABLE IF EXISTS public.orders
 ALTER TABLE IF EXISTS public.clients
   ADD COLUMN IF NOT EXISTS client_note text;
 
+CREATE TABLE IF NOT EXISTS public.admin_profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  role text NOT NULL CHECK (role IN ('owner', 'worker')),
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.admin_profiles
+  ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.is_admin_owner()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.admin_profiles
+    WHERE id = auth.uid()
+      AND role = 'owner'
+  );
+$$;
+
+DROP POLICY IF EXISTS "Admins can read own profile"
+  ON public.admin_profiles;
+
+CREATE POLICY "Admins can read own profile"
+  ON public.admin_profiles
+  FOR SELECT
+  USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Owners can read all admin profiles"
+  ON public.admin_profiles;
+
+CREATE POLICY "Owners can read all admin profiles"
+  ON public.admin_profiles
+  FOR SELECT
+  USING (public.is_admin_owner());
+
 INSERT INTO public.products (
   name,
   category,
