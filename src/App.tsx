@@ -6718,8 +6718,8 @@ export default function App() {
                   Смотреть все
                 </button>
               </div>
-              <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
-                <div className="flex gap-3 snap-x snap-mandatory touch-pan-x">
+              <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+                <div className="flex w-max gap-3 snap-x snap-mandatory touch-pan-x">
                   {popularProducts.map((product) => {
                     const productImage = product.image_url || product.image
                     const stockDisplay = getStockDisplay(product)
@@ -6728,9 +6728,9 @@ export default function App() {
                     return (
                       <article
                         key={product.id}
-                        className="snap-start min-w-[15rem] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                        className="h-[278px] w-[168px] shrink-0 snap-start overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                       >
-                        <div className="relative h-32 w-full overflow-hidden bg-slate-100">
+                        <div className="relative h-[120px] w-full overflow-hidden bg-slate-100">
                           <ProductImage
                             src={productImage}
                             alt={product.name}
@@ -6739,18 +6739,18 @@ export default function App() {
                             fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
                           />
                         </div>
-                        <div className="space-y-2 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                        <div className="space-y-1.5 overflow-hidden p-3">
+                          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                             {product.category ?? product.subtitle}
                           </p>
-                          <h3 className="text-sm font-bold text-slate-900 line-clamp-2">{product.name}</h3>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${statusToneClass[product.statusTone]}`}>
+                          <h3 className="line-clamp-2 min-h-9 text-sm font-bold leading-tight text-slate-900">{product.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusToneClass[product.statusTone]}`}>
                               {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
                             </span>
-                            <span className="text-xs text-slate-500">{stockDisplay.label}</span>
+                            <span className="hidden">{stockDisplay.label}</span>
                           </div>
-                          <div className="rounded-3xl bg-slate-50 p-3 text-sm">
+                          <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                             <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{isB2B ? 'Опт' : 'Розница'}</p>
                             <p className="mt-1 font-bold text-slate-900">{formatCurrency(isB2B ? product.basePrice : product.wholesale_price ?? product.basePrice)}/кг</p>
                           </div>
@@ -6875,7 +6875,7 @@ export default function App() {
                 : 'По выбранному фильтру позиций нет. Выберите другую вкладку.'}
           </p>
         ) : (
-          <div id="product-grid" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div id="product-grid" className="grid gap-4 pb-32 md:grid-cols-2 md:pb-0 xl:grid-cols-3">
             {filteredProducts.map((product) => {
               const volume = volumes[product.id] ?? getProductDisplayConfig(product, isB2B).defaultVolume
                           const { pricePerKg } = calcPricing(product, volume, isB2B)
@@ -6889,6 +6889,14 @@ export default function App() {
               const primaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
               const secondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
               const isProductInStock = product.in_stock !== false
+              const mobilePrimaryPriceLabel = isB2B ? 'Опт' : 'Розница'
+              const mobilePrimaryPrice = isB2B
+                ? product.wholesale_price ?? product.basePrice
+                : product.retail_price ?? product.basePrice + RETAIL_MARKUP
+              const mobileSecondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
+              const mobileSecondaryPrice = isB2B
+                ? product.retail_price ?? product.basePrice + RETAIL_MARKUP
+                : product.wholesale_price ?? product.basePrice
               const isUnavailable = product.in_stock === false && product.is_in_transit !== true
               const compactMeta = [product.variant, product.origin, product.subtitle].filter(Boolean).join(' · ')
               const cfg = getProductDisplayConfig(product, isB2B)
@@ -6899,14 +6907,14 @@ export default function App() {
               return (
                 <article
                   key={product.id}
-                  className="flex h-full flex-col overflow-hidden rounded-3xl bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                  className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md lg:rounded-3xl lg:border-0"
                 >
-                  <div className="relative h-44 w-full overflow-hidden bg-slate-100">
+                  <div className="relative h-[180px] w-full overflow-hidden bg-slate-100 lg:h-44">
                     <ProductImage
                       src={productImage}
                       alt={product.name}
                       className="h-full w-full object-cover"
-                      imgClassName="h-full w-full object-cover"
+                      imgClassName="h-full w-full object-cover object-center"
                       fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
                     />
                     {inCart && (
@@ -6916,65 +6924,87 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="lg:hidden flex flex-col gap-3 p-3">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-2.5 p-3 lg:hidden">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                           {product.category ?? product.subtitle}
                         </p>
-                        <h3 className="mt-1 text-base font-bold text-slate-900 line-clamp-2">
+                        <h3 className="mt-1 line-clamp-2 text-base font-bold leading-tight text-slate-900">
                           {product.name}
                         </h3>
                         {compactMeta && (
-                          <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">
+                          <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
                             {compactMeta}
                           </p>
                         )}
                       </div>
-                      <span className={`ml-3 shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${statusToneClass[product.statusTone]}`}>
+                      <span className={`ml-2 max-w-[5.75rem] shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-bold ${statusToneClass[product.statusTone]}`}>
                         {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
                       </span>
                     </div>
 
-                    <div className="flex items-end justify-between">
-                      <div>
+                    <button
+                      type="button"
+                      onClick={() => toggleAnalytics(product.id)}
+                      className="w-fit text-xs font-semibold text-brand-700 underline-offset-2 hover:underline"
+                    >
+                      Подробнее о товаре
+                    </button>
+
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <p className="text-base font-bold leading-tight text-brand-800">
+                        {mobilePrimaryPriceLabel}: {formatCurrency(mobilePrimaryPrice)}/кг
+                      </p>
+                      <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                        {mobileSecondaryPriceLabel}: {formatCurrency(mobileSecondaryPrice)}/кг
+                      </p>
+                      <div className="hidden">
+                      <p className="text-base font-bold leading-tight text-brand-800">
+                        Опт: {formatCurrency(isB2B ? pricePerKg : secondaryPrice)}/кг
+                      </p>
+                      <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                        Розница: {formatCurrency(isB2B ? secondaryPrice : pricePerKg)}/кг
+                      </p>
+                      <div className="hidden">
                         <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{primaryPriceLabel}</p>
                         <p className="mt-1 text-lg font-bold text-brand-900">{formatCurrency(pricePerKg)}/кг</p>
                       </div>
                       <p className="text-xs text-slate-500">{secondaryPriceLabel}: {formatCurrency(secondaryPrice)}/кг</p>
                     </div>
+                    </div>
 
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1">
+                    <div className="flex flex-col gap-2">
+                      <div className="inline-flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-1">
                         <button
                           type="button"
                           onClick={() => setProductVolume(product, snapVolume(volume - step, product, isB2B))}
                           disabled={!canDecrease}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Уменьшить количество ${product.name}`}
                         >
                           <Minus className="h-4 w-4" aria-hidden />
                         </button>
-                        <div className="px-2 text-sm font-semibold text-slate-900">
+                        <div className="min-w-[4.5rem] px-1 text-center text-sm font-bold text-slate-900">
                           {formatVolumeLabel(product, volume, isB2B)}
                         </div>
                         <button
                           type="button"
                           onClick={() => setProductVolume(product, snapVolume(volume + step, product, isB2B))}
                           disabled={!canIncrease}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Увеличить количество ${product.name}`}
                         >
                           <Plus className="h-4 w-4" aria-hidden />
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex w-full min-w-0 items-center gap-2">
                         <button
                           type="button"
                           onClick={() => addToCart(product)}
                           disabled={cannotOrderProduct}
-                          className={`flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold text-white transition active:scale-[0.98] ${
+                          className={`flex h-12 w-full min-w-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-xl px-3 text-[0] font-semibold text-white transition active:scale-[0.98] ${
                             cannotOrderProduct
                               ? 'cursor-not-allowed bg-slate-300 text-slate-500'
                               : justAdded
@@ -6982,13 +7012,15 @@ export default function App() {
                               : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700'
                           }`}
                         >
-                          <Plus className="h-4 w-4" aria-hidden />
-                          {cannotOrderProduct ? (isUnavailable ? 'Нет в наличии' : 'Недостаточно остатка') : (justAdded ? 'Добавлено' : inCart ? 'Добавить' : 'В корзину')}
+                          <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                          <span className="truncate text-sm">
+                            {cannotOrderProduct ? (isUnavailable ? 'Нет' : 'Мало') : (justAdded ? 'Добавлено' : 'В корзину')}
+                          </span>
                         </button>
                         <button
                           type="button"
                           onClick={() => toggleAnalytics(product.id)}
-                          className="text-sm text-slate-600 underline-offset-2 hover:underline"
+                          className="hidden"
                         >
                           Подробнее
                         </button>
