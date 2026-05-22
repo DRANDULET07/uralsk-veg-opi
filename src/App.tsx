@@ -1206,6 +1206,73 @@ function getAdminPeriodLabel(preset: AdminPeriodPreset, dateFrom: string, dateTo
   return ADMIN_PERIOD_OPTIONS.find((option) => option.id === preset)?.label ?? 'Все время'
 }
 
+const REPORT_MONTH_NAMES = [
+  'январь',
+  'февраль',
+  'март',
+  'апрель',
+  'май',
+  'июнь',
+  'июль',
+  'август',
+  'сентябрь',
+  'октябрь',
+  'ноябрь',
+  'декабрь',
+] as const
+
+function formatReportDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${day}.${month}.${date.getFullYear()}`
+}
+
+function getReportInputDate(value: string): Date | null {
+  if (!value) return null
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatReportDateRange(from: Date, to: Date): string {
+  return `${formatReportDate(from)}–${formatReportDate(to)}`
+}
+
+function getReportPeriodText(preset: AdminPeriodPreset, dateFrom: string, dateTo: string): string {
+  const today = new Date()
+
+  if (preset === 'all') {
+    return 'Всё время'
+  }
+
+  if (preset === 'custom') {
+    const from = getReportInputDate(dateFrom)
+    const to = getReportInputDate(dateTo)
+    if (from && to) return formatReportDateRange(from, to)
+    if (from) return `с ${formatReportDate(from)}`
+    if (to) return `по ${formatReportDate(to)}`
+    return 'Выбранный период'
+  }
+
+  if (preset === 'today') {
+    return `Сегодня — ${formatReportDate(today)}`
+  }
+
+  if (preset === 'last7' || preset === 'last30') {
+    const days = preset === 'last7' ? 6 : 29
+    const from = startOfDay(today)
+    from.setDate(from.getDate() - days)
+    const label = preset === 'last7' ? 'Последние 7 дней' : 'Последние 30 дней'
+    return `${label} — ${formatReportDateRange(from, today)}`
+  }
+
+  if (preset === 'current-month') {
+    return `Этот месяц — ${REPORT_MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`
+  }
+
+  const previousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+  return `Прошлый месяц — ${REPORT_MONTH_NAMES[previousMonth.getMonth()]} ${previousMonth.getFullYear()}`
+}
+
 function getReportStatusLabel(statusMode: AdminReportStatusMode): string {
   return REPORT_STATUS_OPTIONS.find((option) => option.id === statusMode)?.label ?? 'Все статусы'
 }
@@ -2541,6 +2608,7 @@ function AdminPage() {
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null)
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [reportCopied, setReportCopied] = useState(false)
   const [editingStaffNoteOrderId, setEditingStaffNoteOrderId] = useState<string | null>(null)
   const [staffNoteDraft, setStaffNoteDraft] = useState('')
   const [savingStaffNoteOrderId, setSavingStaffNoteOrderId] = useState<string | null>(null)
@@ -2726,6 +2794,7 @@ function AdminPage() {
   const orderAnalytics = useMemo(() => {
     const productTotals = new Map<string, { productName: string; totalQuantityKg: number; totalAmount: number }>()
     const clientTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
+    const orderTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
     const receivingTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
 
     const totals = reportFilteredOrders.reduce(
@@ -2759,6 +2828,18 @@ function AdminPage() {
           ...currentClient,
           count: currentClient.count + 1,
           totalAmount: currentClient.totalAmount + order.total_amount,
+        })
+
+        const orderTypeLabel = order.order_type || 'Не указан'
+        const currentOrderType = orderTypeTotals.get(orderTypeLabel) ?? {
+          label: orderTypeLabel,
+          count: 0,
+          totalAmount: 0,
+        }
+        orderTypeTotals.set(orderTypeLabel, {
+          ...currentOrderType,
+          count: currentOrderType.count + 1,
+          totalAmount: currentOrderType.totalAmount + order.total_amount,
         })
 
         const receivingLabel = order.receiving_type || 'Не указано'
@@ -2811,10 +2892,67 @@ function AdminPage() {
         .sort((a, b) => b.totalAmount - a.totalAmount)
         .slice(0, 5),
       clientTypes: Array.from(clientTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
+      orderTypes: Array.from(orderTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
       receivingTypes: Array.from(receivingTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
     }
   }, [reportFilteredOrders])
   const quickCalcTotal = toNumber(quickCalcPrice) * toNumber(quickCalcQuantity)
+
+  const buildReportCopyText = () => {
+    const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
+
+    if (reportFilteredOrders.length === 0) {
+      return ['URALSK VEG OPI', `Отчёт: ${periodLabel}`, 'Заказов нет.'].join('\n')
+    }
+
+    const productLines = orderAnalytics.topProducts.map(
+      (item, index) =>
+        `${index + 1}. ${item.productName} - ${formatKg(item.totalQuantityKg)} / ${formatCurrency(item.totalAmount)}`,
+    )
+    const receivingLines = orderAnalytics.receivingTypes.map(
+      (item) => `${item.label} - ${item.count} заказов / ${formatCurrency(item.totalAmount)}`,
+    )
+    const orderTypeLines = orderAnalytics.orderTypes.map(
+      (item) => `${item.label} - ${item.count} заказов / ${formatCurrency(item.totalAmount)}`,
+    )
+
+    return [
+      'URALSK VEG OPI',
+      `Отчёт: ${periodLabel}`,
+      '',
+      `Заказов: ${reportFilteredOrders.length}`,
+      `Выручка: ${formatCurrency(orderAnalytics.completedRevenue)}`,
+      `Ожидаемая сумма: ${formatCurrency(orderAnalytics.expectedAmount)}`,
+      `Отменено: ${formatCurrency(orderAnalytics.cancelledAmount)}`,
+      `Общий оборот: ${formatCurrency(orderAnalytics.totalTurnover)}`,
+      `Средний чек: ${formatCurrency(orderAnalytics.averageCheck)}`,
+      '',
+      `Общий вес: ${formatKg(orderAnalytics.totalWeightKg)}`,
+      `Выполнено: ${formatKg(orderAnalytics.completedWeightKg)}`,
+      `Ожидается: ${formatKg(orderAnalytics.expectedWeightKg)}`,
+      `Отменено: ${formatKg(orderAnalytics.cancelledWeightKg)}`,
+      '',
+      'Топ товаров:',
+      ...(productLines.length > 0 ? productLines : ['Нет данных']),
+      '',
+      'Получение:',
+      ...(receivingLines.length > 0 ? receivingLines : ['Нет данных']),
+      '',
+      'Типы заказов:',
+      ...(orderTypeLines.length > 0 ? orderTypeLines : ['Нет данных']),
+    ].join('\n')
+  }
+
+  const copyReportToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(buildReportCopyText())
+      setReportCopied(true)
+      setOrdersError(null)
+      window.setTimeout(() => setReportCopied(false), 1800)
+    } catch {
+      setOrdersError('Не удалось скопировать отчёт')
+    }
+  }
 
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -3437,9 +3575,18 @@ function AdminPage() {
                   Отчёт: {reportSummary}
                 </p>
               </div>
-              <p className="text-sm font-bold text-brand-700">
-                {reportFilteredOrders.length} заказов
-              </p>
+              <div className="flex flex-col gap-2 sm:items-end">
+                <p className="text-sm font-bold text-brand-700">
+                  {reportFilteredOrders.length} заказов
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void copyReportToClipboard()}
+                  className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-100"
+                >
+                  {reportCopied ? 'Отчёт скопирован' : 'Скопировать отчёт'}
+                </button>
+              </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
               <div className="rounded-2xl bg-emerald-50 px-3 py-2 sm:px-4 sm:py-3">
