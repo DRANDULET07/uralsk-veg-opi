@@ -170,18 +170,6 @@ const FULFILLMENT_LABELS: Record<FulfillmentType, string> = {
   delivery: 'Доставка',
 }
 
-const CUSTOMER_TYPE_OPTIONS: { value: CustomerType; label: string }[] = [
-  { value: 'retail', label: 'Розница' },
-  { value: 'wholesale', label: 'Оптовик' },
-  { value: 'shop', label: 'Магазин' },
-  { value: 'cafe', label: 'Кафе' },
-]
-
-const ORDER_TYPE_OPTIONS: { value: OrderType; label: string }[] = [
-  { value: 'retail', label: 'Розничный' },
-  { value: 'wholesale', label: 'Оптовый' },
-]
-
 const FULFILLMENT_OPTIONS: { value: FulfillmentType; label: string }[] = [
   { value: 'pickup', label: 'Самовывоз' },
   { value: 'delivery', label: 'Доставка' },
@@ -600,7 +588,7 @@ function createCheckoutForm(isB2B: boolean): CheckoutForm {
   return {
     name: '',
     phone: '',
-    customerType: '',
+    customerType: isB2B ? 'wholesale' : 'retail',
     orderType: isB2B ? 'wholesale' : 'retail',
     fulfillment: '',
     address: '',
@@ -637,6 +625,11 @@ function CheckoutFormContent({
   onBack,
   updateCheckoutField,
 }: CheckoutFormContentProps) {
+  const commentPlaceholder =
+    checkoutForm.fulfillment === 'pickup'
+      ? 'Например: заберу после 18:00'
+      : 'Например: доставить после 18:00'
+
   return (
     <div className="space-y-4 px-5 pb-4 pt-4 sm:grid sm:grid-cols-[1.2fr_0.8fr] sm:gap-4 sm:pb-6">
       <div className="space-y-4">
@@ -696,59 +689,7 @@ function CheckoutFormContent({
             )}
           </label>
 
-          <div className="sm:col-span-2">
-            <span className="text-sm font-semibold text-slate-700">Тип клиента</span>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {CUSTOMER_TYPE_OPTIONS.map((option) => {
-                const selected = checkoutForm.customerType === option.value
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => updateCheckoutField('customerType', option.value)}
-                    aria-pressed={selected}
-                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition focus:outline-none ${
-                      selected
-                        ? 'border-brand-700 bg-brand-700 text-white shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                )
-              })}
-            </div>
-            {checkoutErrors.customerType && (
-              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.customerType}</p>
-            )}
-          </div>
-
-          <div className="sm:col-span-2">
-            <span className="text-sm font-semibold text-slate-700">Тип заказа</span>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {ORDER_TYPE_OPTIONS.map((option) => {
-                const selected = checkoutForm.orderType === option.value
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => updateCheckoutField('orderType', option.value)}
-                    aria-pressed={selected}
-                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition focus:outline-none ${
-                      selected
-                        ? 'border-brand-700 bg-brand-700 text-white shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:text-brand-700'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                )
-              })}
-            </div>
-            {checkoutErrors.orderType && (
-              <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.orderType}</p>
-            )}
-          </div>
+          {/* Тип клиента и Тип заказа определяются автоматически по режиму сайта (isB2B) */}
 
           <div className="sm:col-span-2">
             <span className="text-sm font-semibold text-slate-700">Получение</span>
@@ -800,7 +741,7 @@ function CheckoutFormContent({
               onChange={(e) => updateCheckoutField('comment', e.target.value)}
               rows={3}
               className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-              placeholder="Доставить после 18:00"
+              placeholder={commentPlaceholder}
             />
           </label>
         </div>
@@ -897,8 +838,7 @@ function buildCartWhatsAppMessage(
     ? [
         `Имя: ${checkout.name.trim()}`,
         `Телефон: ${formatPhoneForDisplay(displayPhone)}`,
-        `Тип клиента: ${CUSTOMER_TYPE_LABELS[checkout.customerType as CustomerType]}`,
-        `Тип заказа: ${ORDER_TYPE_LABELS[checkout.orderType as OrderType]}`,
+        `Тип заказа: ${ORDER_TYPE_LABELS[isB2B ? 'wholesale' : 'retail']}`,
         `Получение: ${FULFILLMENT_LABELS[checkout.fulfillment as FulfillmentType]}`,
         checkout.fulfillment === 'delivery' ? `Адрес: ${checkout.address.trim()}` : null,
         checkout.comment.trim() ? `Комментарий: ${checkout.comment.trim()}` : null,
@@ -3206,6 +3146,13 @@ export default function App() {
   const [checkoutForm, setCheckoutForm] = useState<CheckoutForm>(() =>
     createCheckoutForm(true),
   )
+  useEffect(() => {
+    setCheckoutForm((prev) => ({
+      ...prev,
+      orderType: isB2B ? 'wholesale' : 'retail',
+      customerType: isB2B ? 'wholesale' : 'retail',
+    }))
+  }, [isB2B])
   const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({})
   const [checkoutSubmitError, setCheckoutSubmitError] = useState<string | null>(null)
   const [checkoutSuccessMessage, setCheckoutSuccessMessage] = useState<string | null>(null)
@@ -3517,8 +3464,7 @@ export default function App() {
     } else if (!isValidNormalizedPhone(normalizedPhone)) {
       nextErrors.phone = 'Введите номер Казахстана в формате +7 777 123 45 67'
     }
-    if (!checkoutForm.customerType) nextErrors.customerType = 'Выберите тип клиента'
-    if (!checkoutForm.orderType) nextErrors.orderType = 'Выберите тип заказа'
+    // order type and customer type are determined automatically by site mode (isB2B)
     if (!checkoutForm.fulfillment) nextErrors.fulfillment = 'Выберите способ получения'
     if (checkoutForm.fulfillment === 'delivery' && !checkoutForm.address.trim()) {
       nextErrors.address = 'Укажите адрес доставки'
@@ -3551,8 +3497,8 @@ export default function App() {
       throw new Error('Введите корректный номер телефона перед сохранением заказа.')
     }
 
-    const clientType = CUSTOMER_TYPE_LABELS[checkoutForm.customerType as CustomerType]
-    const orderType = ORDER_TYPE_LABELS[checkoutForm.orderType as OrderType]
+    const clientType = isB2B ? CUSTOMER_TYPE_LABELS['wholesale'] : CUSTOMER_TYPE_LABELS['retail']
+    const orderType = isB2B ? ORDER_TYPE_LABELS['wholesale'] : ORDER_TYPE_LABELS['retail']
     const receivingType = FULFILLMENT_LABELS[checkoutForm.fulfillment as FulfillmentType]
     const deliveryAddress =
       checkoutForm.fulfillment === 'delivery' ? checkoutForm.address.trim() : null
