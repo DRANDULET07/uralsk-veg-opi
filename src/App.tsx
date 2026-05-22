@@ -27,6 +27,11 @@ import type { Product } from './types/product'
 
 const WHATSAPP_PHONE = '77774681889'
 const LOCAL_STORAGE_ORDER_IDS = 'uralsk_veg_order_ids'
+const LOCAL_STORAGE_CART = 'uralsk_veg_cart'
+const CUSTOMER_COMMENT_MAX_LENGTH = 300
+const DELIVERY_ADDRESS_MAX_LENGTH = 150
+const STAFF_NOTE_MAX_LENGTH = 500
+const CLIENT_NOTE_MAX_LENGTH = 500
 
 type TabId = 'all' | 'warehouse' | 'transit'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
@@ -627,6 +632,71 @@ function formatPhoneForDisplay(phone: string): string {
   return `+${phone.slice(0, 1)} ${phone.slice(1, 4)} ${phone.slice(4, 7)} ${phone.slice(7, 9)} ${phone.slice(9, 11)}`
 }
 
+function formatPhoneInput(value: string): string {
+  const digits = value.replace(/\D/g, '')
+  if (!digits) return ''
+
+  const normalizedDigits = digits.startsWith('8')
+    ? `7${digits.slice(1)}`
+    : digits.startsWith('7')
+    ? digits
+    : `7${digits}`
+  const phone = normalizedDigits.slice(0, 11)
+  const parts = [
+    phone.slice(1, 4),
+    phone.slice(4, 7),
+    phone.slice(7, 9),
+    phone.slice(9, 11),
+  ].filter(Boolean)
+
+  return `+${phone.slice(0, 1)}${parts.length > 0 ? ` ${parts.join(' ')}` : ''}`
+}
+
+function getSavedCart(): Cart {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_CART)
+    const parsed = raw ? JSON.parse(raw) : {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).flatMap(([productId, value]) => {
+        const volume = toNumber(value)
+        return productId.trim() && volume > 0 ? [[productId, volume]] : []
+      }),
+    )
+  } catch {
+    localStorage.removeItem(LOCAL_STORAGE_CART)
+    return {}
+  }
+}
+
+function saveCartToLocalStorage(cart: Cart) {
+  if (Object.keys(cart).length === 0) {
+    localStorage.removeItem(LOCAL_STORAGE_CART)
+    return
+  }
+
+  localStorage.setItem(LOCAL_STORAGE_CART, JSON.stringify(cart))
+}
+
+function limitText(value: string, maxLength: number): string {
+  return value.slice(0, maxLength)
+}
+
+function CharacterCounter({
+  value,
+  maxLength,
+}: {
+  value: string
+  maxLength: number
+}) {
+  return (
+    <p className="mt-1 text-right text-xs text-slate-400">
+      {value.length} / {maxLength}
+    </p>
+  )
+}
+
 function getStoredOrderIds(): string[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_ORDER_IDS)
@@ -742,13 +812,14 @@ function CheckoutFormContent({
 
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">Телефон</span>
-            <input
-              type="tel"
-              value={checkoutForm.phone}
-              onChange={(e) => updateCheckoutField('phone', e.target.value)}
-              className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-              placeholder="+7 700 000 00 00"
-            />
+              <input
+                type="tel"
+                value={checkoutForm.phone}
+                inputMode="tel"
+                onChange={(e) => updateCheckoutField('phone', formatPhoneInput(e.target.value))}
+                className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
+                placeholder="+7 700 000 00 00"
+              />
             {checkoutErrors.phone && (
               <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.phone}</p>
             )}
@@ -789,10 +860,14 @@ function CheckoutFormContent({
               <input
                 type="text"
                 value={checkoutForm.address}
-                onChange={(e) => updateCheckoutField('address', e.target.value)}
+                maxLength={DELIVERY_ADDRESS_MAX_LENGTH}
+                onChange={(e) =>
+                  updateCheckoutField('address', limitText(e.target.value, DELIVERY_ADDRESS_MAX_LENGTH))
+                }
                 className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
                 placeholder="Уральск, ул. Абая 10"
               />
+              <CharacterCounter value={checkoutForm.address} maxLength={DELIVERY_ADDRESS_MAX_LENGTH} />
               {checkoutErrors.address && (
                 <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.address}</p>
               )}
@@ -803,11 +878,15 @@ function CheckoutFormContent({
             <span className="text-sm font-semibold text-slate-700">Комментарий</span>
             <textarea
               value={checkoutForm.comment}
-              onChange={(e) => updateCheckoutField('comment', e.target.value)}
+              maxLength={CUSTOMER_COMMENT_MAX_LENGTH}
+              onChange={(e) =>
+                updateCheckoutField('comment', limitText(e.target.value, CUSTOMER_COMMENT_MAX_LENGTH))
+              }
               rows={3}
               className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
               placeholder={commentPlaceholder}
             />
+            <CharacterCounter value={checkoutForm.comment} maxLength={CUSTOMER_COMMENT_MAX_LENGTH} />
           </label>
         </div>
       </div>
@@ -931,6 +1010,38 @@ function getCartWhatsAppUrl(
 ): string {
   const text = buildCartWhatsAppMessage(lines, grandTotal, isB2B, checkout, normalizedPhone)
   return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`
+}
+
+function CollapsibleText({
+  text,
+  className = '',
+}: {
+  text: string
+  className?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const shouldCollapse = text.length > 140 || text.split(/\r?\n/).length > 3
+
+  return (
+    <div>
+      <p
+        className={`${className} whitespace-pre-wrap break-words ${
+          shouldCollapse && !expanded ? 'max-h-[4.8em] overflow-hidden' : ''
+        }`}
+      >
+        {text}
+      </p>
+      {shouldCollapse && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-1 text-xs font-bold text-brand-700 transition hover:text-brand-900"
+        >
+          {expanded ? 'Скрыть' : 'Показать полностью'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function matchesTab(product: Product, tab: TabId): boolean {
@@ -1602,7 +1713,7 @@ function AdminClientsPanel() {
     setError(null)
 
     try {
-      const nextNote = clientNoteDraft.trim() || null
+      const nextNote = limitText(clientNoteDraft.trim(), CLIENT_NOTE_MAX_LENGTH) || null
       const { error: updateError } = await supabase
         .from('clients')
         .update({ client_note: nextNote })
@@ -1794,15 +1905,19 @@ function AdminClientsPanel() {
                   </div>
 
                   {editingClientNoteId === client.id ? (
-                    <div className="mt-3 space-y-3">
+                    <div className="mt-3">
                       <textarea
                         value={clientNoteDraft}
-                        onChange={(event) => setClientNoteDraft(event.target.value)}
+                        maxLength={CLIENT_NOTE_MAX_LENGTH}
+                        onChange={(event) =>
+                          setClientNoteDraft(limitText(event.target.value, CLIENT_NOTE_MAX_LENGTH))
+                        }
                         rows={4}
                         className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
                         placeholder="Например: часто берёт картофель"
                       />
-                      <div className="flex flex-wrap gap-2">
+                      <CharacterCounter value={clientNoteDraft} maxLength={CLIENT_NOTE_MAX_LENGTH} />
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => void saveClientNote(client.id)}
@@ -2939,8 +3054,11 @@ function AdminPage() {
       const receivingType = FULFILLMENT_LABELS[createOrderForm.fulfillment]
       const deliveryAddress =
         createOrderForm.fulfillment === 'delivery'
-          ? createOrderForm.deliveryAddress.trim() || null
+          ? limitText(createOrderForm.deliveryAddress.trim(), DELIVERY_ADDRESS_MAX_LENGTH) || null
           : null
+      const customerComment =
+        limitText(createOrderForm.comment.trim(), CUSTOMER_COMMENT_MAX_LENGTH) || null
+      const staffNote = limitText(createOrderForm.staffNote.trim(), STAFF_NOTE_MAX_LENGTH) || null
 
       const { data: clientData, error: clientError } = await supabase
         .from('clients')
@@ -2969,8 +3087,8 @@ function AdminPage() {
           order_type: orderTypeLabel,
           receiving_type: receivingType,
           delivery_address: deliveryAddress,
-          comment: createOrderForm.comment.trim() || null,
-          staff_note: createOrderForm.staffNote.trim() || null,
+          comment: customerComment,
+          staff_note: staffNote,
           total_weight_kg: totalWeight,
           total_amount: totalAmount,
           status: 'new',
@@ -3010,11 +3128,11 @@ function AdminPage() {
         order_type: orderTypeLabel,
         receiving_type: receivingType,
         delivery_address: deliveryAddress,
-        comment: createOrderForm.comment.trim() || null,
+        comment: customerComment,
         total_weight_kg: totalWeight,
         total_amount: totalAmount,
         status: 'new',
-        staff_note: createOrderForm.staffNote.trim() || null,
+        staff_note: staffNote,
         archived_at: null,
         created_at: String(orderData.created_at ?? new Date().toISOString()),
         items: (insertedItems ?? []).map((item) => ({
@@ -3639,7 +3757,7 @@ function AdminPage() {
     setOrdersError(null)
 
     try {
-      const nextNote = staffNoteDraft.trim() || null
+      const nextNote = limitText(staffNoteDraft.trim(), STAFF_NOTE_MAX_LENGTH) || null
       const { error } = await supabase
         .from('orders')
         .update({ staff_note: nextNote })
@@ -3801,7 +3919,7 @@ function AdminPage() {
                 ))}
               </select>
               <label
-                className={`${mobileOrderFiltersOpen ? 'flex' : 'hidden'} h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition sm:col-span-3 lg:col-span-1 lg:flex ${
+                className={`hidden h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition lg:col-span-1 lg:flex ${
                   showArchivedOrders
                     ? 'border-white bg-white text-brand-800'
                     : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
@@ -3823,6 +3941,33 @@ function AdminPage() {
               >
                 <RefreshCw className={`h-4 w-4 ${ordersLoading ? 'animate-spin' : ''}`} />
                 Обновить
+              </button>
+            </div>
+
+            <div className="mt-2 grid grid-cols-2 gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setShowArchivedOrders(false)}
+                className={`h-10 rounded-xl border px-3 text-sm font-bold transition ${
+                  !showArchivedOrders
+                    ? 'border-white bg-white text-brand-800'
+                    : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
+                }`}
+                aria-pressed={!showArchivedOrders}
+              >
+                Все заказы
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowArchivedOrders(true)}
+                className={`h-10 rounded-xl border px-3 text-sm font-bold transition ${
+                  showArchivedOrders
+                    ? 'border-white bg-white text-brand-800'
+                    : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
+                }`}
+                aria-pressed={showArchivedOrders}
+              >
+                Архив
               </button>
             </div>
 
@@ -3922,11 +4067,14 @@ function AdminPage() {
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">Телефон</span>
                     <input
-                      type="text"
+                      type="tel"
                       value={createOrderForm.customerPhone}
-                      onChange={(event) => setCreateOrderFormField('customerPhone', event.target.value)}
+                      inputMode="tel"
+                      onChange={(event) =>
+                        setCreateOrderFormField('customerPhone', formatPhoneInput(event.target.value))
+                      }
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                      placeholder="77712345678"
+                      placeholder="+7 777 123 45 67"
                     />
                   </label>
                 </div>
@@ -3959,8 +4107,18 @@ function AdminPage() {
                       <input
                         type="text"
                         value={createOrderForm.deliveryAddress}
-                        onChange={(event) => setCreateOrderFormField('deliveryAddress', event.target.value)}
+                        maxLength={DELIVERY_ADDRESS_MAX_LENGTH}
+                        onChange={(event) =>
+                          setCreateOrderFormField(
+                            'deliveryAddress',
+                            limitText(event.target.value, DELIVERY_ADDRESS_MAX_LENGTH),
+                          )
+                        }
                         className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      />
+                      <CharacterCounter
+                        value={createOrderForm.deliveryAddress}
+                        maxLength={DELIVERY_ADDRESS_MAX_LENGTH}
                       />
                     </label>
                   ) : null}
@@ -4067,16 +4225,36 @@ function AdminPage() {
                     <span className="text-sm font-semibold text-slate-700">Комментарий клиента</span>
                     <textarea
                       value={createOrderForm.comment}
-                      onChange={(event) => setCreateOrderFormField('comment', event.target.value)}
+                      maxLength={CUSTOMER_COMMENT_MAX_LENGTH}
+                      onChange={(event) =>
+                        setCreateOrderFormField(
+                          'comment',
+                          limitText(event.target.value, CUSTOMER_COMMENT_MAX_LENGTH),
+                        )
+                      }
                       className="mt-2 h-28 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    />
+                    <CharacterCounter
+                      value={createOrderForm.comment}
+                      maxLength={CUSTOMER_COMMENT_MAX_LENGTH}
                     />
                   </label>
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">Заметка работника</span>
                     <textarea
                       value={createOrderForm.staffNote}
-                      onChange={(event) => setCreateOrderFormField('staffNote', event.target.value)}
+                      maxLength={STAFF_NOTE_MAX_LENGTH}
+                      onChange={(event) =>
+                        setCreateOrderFormField(
+                          'staffNote',
+                          limitText(event.target.value, STAFF_NOTE_MAX_LENGTH),
+                        )
+                      }
                       className="mt-2 h-28 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    />
+                    <CharacterCounter
+                      value={createOrderForm.staffNote}
+                      maxLength={STAFF_NOTE_MAX_LENGTH}
                     />
                   </label>
                 </div>
@@ -4605,7 +4783,7 @@ function AdminPage() {
                           Адрес доставки
                         </dt>
                         <dd className="font-semibold text-slate-800">
-                          {order.delivery_address}
+                          <CollapsibleText text={order.delivery_address} />
                         </dd>
                       </div>
                     )}
@@ -4614,7 +4792,9 @@ function AdminPage() {
                         <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                           Комментарий
                         </dt>
-                        <dd className="font-semibold text-slate-800">{order.comment}</dd>
+                        <dd className="font-semibold text-slate-800">
+                          <CollapsibleText text={order.comment} />
+                        </dd>
                       </div>
                     )}
                   </dl>
@@ -4636,15 +4816,19 @@ function AdminPage() {
                     </div>
 
                     {editingStaffNoteOrderId === order.id ? (
-                      <div className="mt-3 space-y-3">
+                      <div className="mt-3">
                         <textarea
                           value={staffNoteDraft}
-                          onChange={(event) => setStaffNoteDraft(event.target.value)}
+                          maxLength={STAFF_NOTE_MAX_LENGTH}
+                          onChange={(event) =>
+                            setStaffNoteDraft(limitText(event.target.value, STAFF_NOTE_MAX_LENGTH))
+                          }
                           rows={4}
                           className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
                           placeholder="Внутренняя заметка для работников"
                         />
-                        <div className="flex flex-wrap gap-2">
+                        <CharacterCounter value={staffNoteDraft} maxLength={STAFF_NOTE_MAX_LENGTH} />
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => void saveStaffNote(order.id)}
@@ -4664,9 +4848,12 @@ function AdminPage() {
                         </div>
                       </div>
                     ) : order.staff_note ? (
-                      <p className="mt-3 whitespace-pre-wrap rounded-xl bg-white px-3 py-3 text-sm font-medium leading-relaxed text-slate-700">
-                        {order.staff_note}
-                      </p>
+                      <div className="mt-3 rounded-xl bg-white px-3 py-3">
+                        <CollapsibleText
+                          text={order.staff_note}
+                          className="text-sm font-medium leading-relaxed text-slate-700"
+                        />
+                      </div>
                     ) : (
                       <p className="mt-2 text-sm text-slate-500">Заметки пока нет.</p>
                     )}
@@ -4763,6 +4950,7 @@ export default function App() {
   const [addedProductId, setAddedProductId] = useState<string | null>(null)
   const [analyticsOpenId, setAnalyticsOpenId] = useState<string | null>(null)
   const [cart, setCart] = useState<Cart>({})
+  const [cartRestored, setCartRestored] = useState(false)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutForm, setCheckoutForm] = useState<CheckoutForm>(() =>
     createCheckoutForm(true),
@@ -4939,16 +5127,33 @@ export default function App() {
         }),
       ),
     )
-    setCart((prev) =>
+
+    if (productsLoading || productsError) return
+
+    const sanitizeCart = (nextCart: Cart) =>
       Object.fromEntries(
-        Object.entries(prev).flatMap(([productId, volume]) => {
+        Object.entries(nextCart).flatMap(([productId, volume]) => {
           const product = products.find((p) => p.id === productId)
-          const nextVolume = product ? snapVolume(volume, product, isB2B) : volume
+          if (!product || !canOrderProduct(product, isB2B)) return []
+
+          const nextVolume = snapVolume(volume, product, isB2B)
           return nextVolume > 0 ? [[productId, nextVolume]] : []
         }),
-      ),
-    )
-  }, [isB2B, products])
+      )
+
+    if (!cartRestored) {
+      setCart(sanitizeCart(getSavedCart()))
+      setCartRestored(true)
+      return
+    }
+
+    setCart((prev) => sanitizeCart(prev))
+  }, [cartRestored, isB2B, products, productsError, productsLoading])
+
+  useEffect(() => {
+    if (!cartRestored) return
+    saveCartToLocalStorage(cart)
+  }, [cart, cartRestored])
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
@@ -5049,6 +5254,7 @@ export default function App() {
   const clearCart = () => {
     setCartError(null)
     setCart({})
+    localStorage.removeItem(LOCAL_STORAGE_CART)
     setCheckoutOpen(false)
     setCheckoutErrors({})
     setCheckoutSubmitError(null)
@@ -5160,8 +5366,10 @@ export default function App() {
     const orderType = isB2B ? ORDER_TYPE_LABELS['wholesale'] : ORDER_TYPE_LABELS['retail']
     const receivingType = FULFILLMENT_LABELS[checkoutForm.fulfillment as FulfillmentType]
     const deliveryAddress =
-      checkoutForm.fulfillment === 'delivery' ? checkoutForm.address.trim() : null
-    const comment = checkoutForm.comment.trim() || null
+      checkoutForm.fulfillment === 'delivery'
+        ? limitText(checkoutForm.address.trim(), DELIVERY_ADDRESS_MAX_LENGTH) || null
+        : null
+    const comment = limitText(checkoutForm.comment.trim(), CUSTOMER_COMMENT_MAX_LENGTH) || null
     const totalWeightKg = cartLines.reduce((sum, line) => sum + line.volume, 0)
     const updatedAt = new Date().toISOString()
 
@@ -5282,6 +5490,7 @@ export default function App() {
       saveOrderToStorage(order)
       setCheckoutSuccessMessage('Заказ создан. Сейчас откроется WhatsApp.')
       setCart({})
+      localStorage.removeItem(LOCAL_STORAGE_CART)
       setCartError(null)
       setCheckoutErrors({})
       setCheckoutSubmitError(null)
