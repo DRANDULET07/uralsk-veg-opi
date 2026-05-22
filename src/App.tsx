@@ -26,7 +26,7 @@ import { getErrorMessage, getProducts } from './services/products'
 import type { Product } from './types/product'
 
 const WHATSAPP_PHONE = '77774681889'
-const PROFILE_PHONE = '+7 (707) XXX-XX-XX'
+const LOCAL_STORAGE_ORDER_IDS = 'uralsk_veg_order_ids'
 
 type TabId = 'all' | 'warehouse' | 'transit'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
@@ -570,6 +570,28 @@ function formatPhoneForDisplay(phone: string): string {
   return `+${phone.slice(0, 1)} ${phone.slice(1, 4)} ${phone.slice(4, 7)} ${phone.slice(7, 9)} ${phone.slice(9, 11)}`
 }
 
+function getStoredOrderIds(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_ORDER_IDS)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed)
+      ? parsed.map((id) => String(id)).filter((id) => id.trim().length > 0)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function saveOrderIdToLocalStorage(orderId: string) {
+  const nextIds = Array.from(new Set([...getStoredOrderIds(), String(orderId)]))
+  localStorage.setItem(LOCAL_STORAGE_ORDER_IDS, JSON.stringify(nextIds))
+}
+
+function setStoredOrderIds(orderIds: string[]) {
+  const nextIds = Array.from(new Set(orderIds.map((id) => String(id)).filter(Boolean)))
+  localStorage.setItem(LOCAL_STORAGE_ORDER_IDS, JSON.stringify(nextIds))
+}
+
 function createCheckoutForm(isB2B: boolean): CheckoutForm {
   return {
     name: '',
@@ -668,7 +690,7 @@ function CheckoutFormContent({
               value={checkoutForm.phone}
               onChange={(e) => updateCheckoutField('phone', e.target.value)}
               className="mt-1 h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-600/20"
-              placeholder="+7 777 123 45 67"
+              placeholder="+7 700 000 00 00"
             />
             {checkoutErrors.phone && (
               <p className="mt-1 text-xs font-medium text-red-600">{checkoutErrors.phone}</p>
@@ -3494,6 +3516,11 @@ export default function App() {
   const [lastOrder, setLastOrder] = useState<SavedOrder | null>(null)
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([])
   const [showMyOrders, setShowMyOrders] = useState(false)
+  const [clientOrdersOpen, setClientOrdersOpen] = useState(false)
+  const [clientOrders, setClientOrders] = useState<AdminOrder[]>([])
+  const [clientOrdersError, setClientOrdersError] = useState<string | null>(null)
+  const [hasSearchedClientOrders, setHasSearchedClientOrders] = useState(false)
+  const [isLoadingClientOrders, setIsLoadingClientOrders] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [volumes, setVolumes] = useState<Record<string, number>>(() =>
     Object.fromEntries(fallbackProducts.map((p) => [p.id, p.defaultVolume])),
@@ -3795,7 +3822,7 @@ export default function App() {
     if (!checkoutForm.phone.trim()) {
       nextErrors.phone = 'Укажите номер телефона'
     } else if (!isValidNormalizedPhone(normalizedPhone)) {
-      nextErrors.phone = 'Введите номер Казахстана в формате +7 777 123 45 67'
+      nextErrors.phone = 'Введите номер Казахстана в формате +7 700 000 00 00'
     }
     // order type and customer type are determined automatically by site mode (isB2B)
     if (!checkoutForm.fulfillment) nextErrors.fulfillment = 'Выберите способ получения'
@@ -3930,6 +3957,8 @@ export default function App() {
         : ''
       throw new Error(`Не удалось сохранить товары заказа. Заказ отменён.${cleanupMessage} Ошибка: ${itemsError.message}`)
     }
+
+    return String(order.id)
   }
 
   const handleSubmitCheckout = async () => {
@@ -3947,7 +3976,7 @@ export default function App() {
     if (!isValidNormalizedPhone(normalizedPhone)) {
       setCheckoutErrors((prev) => ({
         ...prev,
-        phone: 'Введите номер Казахстана в формате +7 777 123 45 67',
+        phone: 'Введите номер Казахстана в формате +7 700 000 00 00',
       }))
       return
     }
@@ -3957,7 +3986,8 @@ export default function App() {
     setIsSubmittingOrder(true)
 
     try {
-      await saveCheckoutOrderToSupabase(normalizedPhone)
+      const createdOrderId = await saveCheckoutOrderToSupabase(normalizedPhone)
+      saveOrderIdToLocalStorage(createdOrderId)
 
       const whatsappUrl = getCartWhatsAppUrl(
         cartLines,
@@ -3997,6 +4027,95 @@ export default function App() {
     }
   }
 
+  const mapClientOrderItem = (item: Record<string, unknown>): AdminOrderItem => ({
+    id: String(item.id),
+    order_id: String(item.order_id),
+    product_id: item.product_id === null || item.product_id === undefined ? null : toNumber(item.product_id),
+    product_name: String(item.product_name ?? 'Товар'),
+    quantity_kg: toNumber(item.quantity_kg),
+    price_per_kg: toNumber(item.price_per_kg),
+    total_amount: toNumber(item.total_amount),
+    created_at: typeof item.created_at === 'string' ? item.created_at : null,
+  })
+
+  const mapClientOrder = (
+    order: Record<string, unknown>,
+    itemsByOrder: Map<string, AdminOrderItem[]>,
+  ): AdminOrder => ({
+    id: String(order.id),
+    client_id: order.client_id ? String(order.client_id) : null,
+    customer_name: String(order.customer_name ?? ''),
+    customer_phone: String(order.customer_phone ?? ''),
+    client_type: String(order.client_type ?? ''),
+    order_type: String(order.order_type ?? ''),
+    receiving_type: String(order.receiving_type ?? ''),
+    delivery_address: typeof order.delivery_address === 'string' ? order.delivery_address : null,
+    comment: typeof order.comment === 'string' ? order.comment : null,
+    total_weight_kg: toNumber(order.total_weight_kg),
+    total_amount: toNumber(order.total_amount),
+    status: normalizeAdminStatus(order.status),
+    archived_at: typeof order.archived_at === 'string' ? order.archived_at : null,
+    created_at: String(order.created_at ?? ''),
+    items: itemsByOrder.get(String(order.id)) ?? [],
+  })
+
+  const loadClientOrders = async () => {
+    const storedOrderIds = getStoredOrderIds()
+
+    if (storedOrderIds.length === 0) {
+      setClientOrders([])
+      setClientOrdersError(null)
+      setHasSearchedClientOrders(true)
+      return
+    }
+
+    setIsLoadingClientOrders(true)
+    setClientOrdersError(null)
+    setHasSearchedClientOrders(true)
+
+    try {
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('*')
+        .in('id', storedOrderIds)
+        .order('created_at', { ascending: false })
+
+      if (ordersError) {
+        throw new Error(`Не удалось загрузить заказы с этого устройства: ${ordersError.message}`)
+      }
+
+      const uniqueOrders = ((ordersData ?? []) as Record<string, unknown>[]).sort((a, b) => {
+        const aTime = new Date(String(a.created_at ?? '')).getTime()
+        const bTime = new Date(String(b.created_at ?? '')).getTime()
+        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
+      })
+      setStoredOrderIds(uniqueOrders.map((order) => String(order.id)))
+
+      const orderIds = uniqueOrders.map((order) => String(order.id))
+      const { data: itemsData, error: itemsError } =
+        orderIds.length > 0
+          ? await supabase.from('order_items').select('*').in('order_id', orderIds)
+          : { data: [], error: null }
+
+      if (itemsError) {
+        throw new Error(`Не удалось загрузить товары заказов: ${itemsError.message}`)
+      }
+
+      const itemsByOrder = new Map<string, AdminOrderItem[]>()
+      ;((itemsData ?? []) as Record<string, unknown>[]).forEach((item) => {
+        const orderId = String(item.order_id)
+        itemsByOrder.set(orderId, [...(itemsByOrder.get(orderId) ?? []), mapClientOrderItem(item)])
+      })
+
+      setClientOrders(uniqueOrders.map((order) => mapClientOrder(order, itemsByOrder)))
+    } catch (error) {
+      setClientOrders([])
+      setClientOrdersError(getErrorMessage(error))
+    } finally {
+      setIsLoadingClientOrders(false)
+    }
+  }
+
   const handleRepeatLastOrder = () => {
     if (!lastOrder) return
     const nextCart: Cart = {}
@@ -4024,6 +4143,27 @@ export default function App() {
             <div className="flex shrink-0 items-center gap-1.5">
               <button
                 type="button"
+                onClick={() => {
+                  setClientOrdersOpen(true)
+                  void loadClientOrders()
+                }}
+                className="hidden rounded-full bg-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:inline-flex"
+              >
+                Мои заказы
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setClientOrdersOpen(true)
+                  void loadClientOrders()
+                }}
+                className="flex h-10 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:hidden"
+                aria-label="Мои заказы"
+              >
+                Мои
+              </button>
+              <button
+                type="button"
                 onClick={() => setCartOpen(true)}
                 className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
                 aria-label={`Корзина: ${cartCount} позиций`}
@@ -4037,9 +4177,12 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setProfileOpen(true)}
+                onClick={() => {
+                  setClientOrdersOpen(true)
+                  void loadClientOrders()
+                }}
                 className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
-                aria-label="Личный кабинет"
+                aria-label="Мои заказы"
               >
                 <User className="h-5 w-5" strokeWidth={2} />
               </button>
@@ -4804,7 +4947,146 @@ export default function App() {
         </div>
       )}
 
-      {profileOpen && (
+      {clientOrdersOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="client-orders-title"
+          onClick={() => setClientOrdersOpen(false)}
+        >
+          <div
+            className="max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white px-5 py-4">
+              <div>
+                <h3 id="client-orders-title" className="text-xl font-bold text-brand-900">
+                  Мои заказы
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Здесь показаны заказы, оформленные с этого устройства.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClientOrdersOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                aria-label="Закрыть"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <button
+                type="button"
+                onClick={() => void loadClientOrders()}
+                disabled={isLoadingClientOrders}
+                className="flex h-12 w-full items-center justify-center rounded-xl bg-brand-700 px-4 text-base font-bold text-white transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-70 sm:w-auto sm:text-sm"
+              >
+                {isLoadingClientOrders ? 'Ищем заказы...' : 'Обновить заказы'}
+              </button>
+
+              {clientOrdersError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                  {clientOrdersError}
+                </div>
+              )}
+
+              {hasSearchedClientOrders && !isLoadingClientOrders && !clientOrdersError && clientOrders.length === 0 && (
+                <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm font-medium text-slate-500">
+                  На этом устройстве заказов пока нет. Оформите заказ, и он появится здесь.
+                </p>
+              )}
+
+              {clientOrders.length > 0 && (
+                <div className="space-y-3">
+                  {clientOrders.map((order) => (
+                    <article key={order.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            {formatAdminDate(order.created_at)}
+                          </p>
+                          <h4 className="mt-1 text-base font-bold text-slate-900">
+                            Заказ #{order.id.slice(0, 8)}
+                          </h4>
+                        </div>
+                        <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${getAdminStatusClass(order.status)}`}>
+                          {ADMIN_STATUS_LABELS[order.status]}
+                        </span>
+                      </div>
+
+                      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <div>
+                          <dt className="text-xs font-semibold uppercase text-slate-400">Тип заказа</dt>
+                          <dd className="font-semibold text-slate-800">{order.order_type || '-'}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase text-slate-400">Получение</dt>
+                          <dd className="font-semibold text-slate-800">{order.receiving_type || '-'}</dd>
+                        </div>
+                        {order.delivery_address && (
+                          <div className="sm:col-span-2">
+                            <dt className="text-xs font-semibold uppercase text-slate-400">Адрес</dt>
+                            <dd className="font-semibold text-slate-800">{order.delivery_address}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt className="text-xs font-semibold uppercase text-slate-400">Общий вес</dt>
+                          <dd className="font-semibold text-slate-800">
+                            {formatVolumeLabel({} as Product, order.total_weight_kg)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase text-slate-400">Сумма</dt>
+                          <dd className="font-bold text-brand-800">{formatCurrency(order.total_amount)}</dd>
+                        </div>
+                        {order.comment && (
+                          <div className="sm:col-span-2">
+                            <dt className="text-xs font-semibold uppercase text-slate-400">Комментарий</dt>
+                            <dd className="font-semibold text-slate-800">{order.comment}</dd>
+                          </div>
+                        )}
+                      </dl>
+
+                      <div className="mt-3">
+                        <p className="mb-2 text-sm font-bold text-slate-800">Товары</p>
+                        {order.items.length === 0 ? (
+                          <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                            Позиции заказа не найдены.
+                          </p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {order.items.map((item) => (
+                              <li key={item.id} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-semibold text-slate-900">{item.product_name}</p>
+                                    <p className="mt-0.5 text-sm text-slate-600">
+                                      {formatVolumeLabel({} as Product, item.quantity_kg)} · {formatCurrency(item.price_per_kg)}/кг
+                                    </p>
+                                  </div>
+                                  <p className="shrink-0 font-bold text-brand-800">
+                                    {formatCurrency(item.total_amount)}
+                                  </p>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {false && profileOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
           role="dialog"
@@ -4819,7 +5101,7 @@ export default function App() {
             <div className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white px-5 py-4">
               <div>
                 <h3 id="profile-modal-title" className="text-lg font-bold text-brand-900">
-                  Личный кабинет покупателя
+                  Мои заказы
                 </h3>
                 <p className="mt-0.5 text-xs text-slate-500">Прототип · скоро полная авторизация</p>
               </div>
@@ -4840,7 +5122,7 @@ export default function App() {
                 </p>
                 <p className="mt-1 flex items-center gap-2 text-sm font-medium text-emerald-900">
                   <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
-                  Вход выполнен через WhatsApp: {PROFILE_PHONE}
+                  Профиль временно скрыт. Используйте раздел «Мои заказы».
                 </p>
               </div>
 
