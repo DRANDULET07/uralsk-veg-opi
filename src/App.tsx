@@ -1306,9 +1306,9 @@ function AdminProductsPanel() {
   const [success, setSuccess] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
   const [onlyInStock, setOnlyInStock] = useState(false)
   const [onlyTransit, setOnlyTransit] = useState(false)
+  const [onlyLowStock, setOnlyLowStock] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<AdminProductForm>(emptyAdminProductForm)
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
@@ -1359,8 +1359,8 @@ function AdminProductsPanel() {
     () => Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort(),
     [products],
   )
-  const statuses = useMemo(
-    () => Array.from(new Set(products.map((product) => product.status).filter(Boolean))).sort(),
+  const lowStockCount = useMemo(
+    () => products.filter((product) => (product.stock_amount ?? 0) <= 50).length,
     [products],
   )
 
@@ -1369,9 +1369,9 @@ function AdminProductsPanel() {
 
     return products.filter((product) => {
       if (categoryFilter !== 'all' && product.category !== categoryFilter) return false
-      if (statusFilter !== 'all' && product.status !== statusFilter) return false
       if (onlyInStock && !product.in_stock) return false
       if (onlyTransit && !product.is_in_transit) return false
+      if (onlyLowStock && (product.stock_amount ?? 0) > 50) return false
       if (!query) return true
 
       return [
@@ -1384,7 +1384,7 @@ function AdminProductsPanel() {
         .toLowerCase()
         .includes(query)
     })
-  }, [categoryFilter, onlyInStock, onlyTransit, products, search, statusFilter])
+  }, [categoryFilter, onlyInStock, onlyLowStock, onlyTransit, products, search])
 
   const startCreate = () => {
     setForm(emptyAdminProductForm)
@@ -1654,6 +1654,7 @@ function AdminProductsPanel() {
           <div>
             <h2 className="text-xl font-bold text-slate-900">Товары</h2>
             <p className="mt-1 text-sm text-slate-500">Каталог из Supabase · без физического удаления</p>
+            <p className="mt-1 text-xs font-semibold text-amber-700">Мало остатка: {lowStockCount}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -1676,7 +1677,7 @@ function AdminProductsPanel() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(18rem,1fr)_12rem_12rem_9rem_8rem]">
+        <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(18rem,1fr)_12rem_9rem_8rem_9rem]">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -1699,18 +1700,6 @@ function AdminProductsPanel() {
               </option>
             ))}
           </select>
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
-          >
-            <option value="all">Все статусы</option>
-            {statuses.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
           <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
             <input
               type="checkbox"
@@ -1728,6 +1717,15 @@ function AdminProductsPanel() {
               className="h-4 w-4 accent-brand-700"
             />
             В пути
+          </label>
+          <label className="flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+            <input
+              type="checkbox"
+              checked={onlyLowStock}
+              onChange={(event) => setOnlyLowStock(event.target.checked)}
+              className="h-4 w-4 accent-amber-600"
+            />
+            Мало остатка
           </label>
         </div>
       </div>
@@ -1913,6 +1911,7 @@ function AdminProductsPanel() {
           {filteredProducts.map((product) => {
             const productImage = product.image_url || product.image
             const isQuickUpdating = quickUpdatingProductId === product.id
+            const isLowStock = (product.stock_amount ?? 0) <= 50
 
             return (
               <article key={product.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
@@ -1934,6 +1933,11 @@ function AdminProductsPanel() {
                       <span className={`rounded-full border px-3 py-1 text-xs font-bold ${product.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
                         {product.is_active ? 'Показан' : 'Скрыт'}
                       </span>
+                      {isLowStock && (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">
+                          Мало остатка
+                        </span>
+                      )}
                     </div>
                     <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">Розница</dt><dd className="font-bold text-brand-800">{formatCurrency(product.retail_price)}</dd></div>
