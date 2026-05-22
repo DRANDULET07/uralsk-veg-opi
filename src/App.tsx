@@ -766,8 +766,8 @@ function CheckoutFormContent({
       : 'Например: доставить после 18:00'
 
   return (
-    <div className="space-y-4 px-5 pb-4 pt-4 sm:grid sm:grid-cols-[1.2fr_0.8fr] sm:gap-4 sm:pb-6">
-      <div className="space-y-4">
+    <div className="space-y-4 px-5 pb-4 pt-4 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(220px,280px)] sm:gap-4 sm:pb-6">
+      <div className="min-w-0 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
@@ -4973,6 +4973,8 @@ export default function App() {
   const [clientOrdersOpen, setClientOrdersOpen] = useState(false)
   const [clientOrders, setClientOrders] = useState<AdminOrder[]>([])
   const [clientOrdersError, setClientOrdersError] = useState<string | null>(null)
+  const [clientOrdersSuccess, setClientOrdersSuccess] = useState<string | null>(null)
+  const [cancellingClientOrderId, setCancellingClientOrderId] = useState<string | null>(null)
   const [hasStoredOrderIds, setHasStoredOrderIds] = useState(false)
   const [hasSearchedClientOrders, setHasSearchedClientOrders] = useState(false)
   const [isLoadingClientOrders, setIsLoadingClientOrders] = useState(false)
@@ -5241,8 +5243,13 @@ export default function App() {
     setProductVolume(product, order.volume)
     setCart((prev) => ({
       ...prev,
-      [product.id]: snapVolume(order.volume, product),
+      [product.id]: snapVolume(order.volume, product, isB2B),
     }))
+    setProfileOpen(false)
+    setCheckoutOpen(false)
+    setCheckoutStep('cart')
+    setCartOpen(true)
+    setCartError('Товары добавлены в корзину')
     setRepeatedOrderId(order.id)
     window.setTimeout(() => setRepeatedOrderId(null), 1800)
   }
@@ -5322,6 +5329,8 @@ export default function App() {
       ...prev,
       orderType: isB2B ? 'wholesale' : 'retail',
     }))
+    setCartOpen(false)
+    setCheckoutStep('details')
     setCheckoutOpen(true)
   }
 
@@ -5543,12 +5552,14 @@ export default function App() {
     if (storedOrderIds.length === 0) {
       setClientOrders([])
       setClientOrdersError(null)
+      setClientOrdersSuccess(null)
       setHasSearchedClientOrders(true)
       return
     }
 
     setIsLoadingClientOrders(true)
     setClientOrdersError(null)
+    setClientOrdersSuccess(null)
     setHasSearchedClientOrders(true)
 
     try {
@@ -5594,6 +5605,79 @@ export default function App() {
     }
   }
 
+  const cancelClientOrder = async (order: AdminOrder) => {
+    if (order.archived_at || (order.status !== 'new' && order.status !== 'processing')) return
+
+    const storedOrderIds = getStoredOrderIds()
+    if (!storedOrderIds.includes(order.id)) {
+      setClientOrdersError('Не удалось отменить заказ. Попробуйте ещё раз.')
+      return
+    }
+
+    const confirmed = window.confirm('Вы уверены, что хотите отменить заказ?')
+    if (!confirmed) return
+
+    setCancellingClientOrderId(order.id)
+    setClientOrdersError(null)
+    setClientOrdersSuccess(null)
+
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', order.id)
+        .in('status', ['new', 'processing'])
+        .is('archived_at', null)
+        .select('id')
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data?.id) {
+        throw new Error('Не удалось отменить заказ. Попробуйте ещё раз.')
+      }
+
+      setClientOrders((prev) =>
+        prev.map((clientOrder) =>
+          clientOrder.id === order.id ? { ...clientOrder, status: 'cancelled' } : clientOrder,
+        ),
+      )
+      setClientOrdersSuccess('Заказ отменён')
+    } catch (error) {
+      setClientOrdersError(getErrorMessage(error) || 'Не удалось отменить заказ. Попробуйте ещё раз.')
+    } finally {
+      setCancellingClientOrderId(null)
+    }
+  }
+
+  const repeatClientOrder = (order: AdminOrder) => {
+    const nextCart: Cart = {}
+    const targetIsB2B =
+      order.order_type === ORDER_TYPE_LABELS.wholesale ||
+      order.client_type === CUSTOMER_TYPE_LABELS.wholesale
+
+    order.items.forEach((item) => {
+      if (item.product_id === null) return
+
+      const product = products.find((product) => String(product.id) === String(item.product_id))
+      if (!product || !canOrderProduct(product, targetIsB2B)) return
+
+      nextCart[product.id] = snapVolume(item.quantity_kg, product, targetIsB2B)
+    })
+
+    if (Object.keys(nextCart).length === 0) {
+      setClientOrdersError('Не удалось повторить заказ: товары больше недоступны.')
+      return
+    }
+
+    setIsB2B(targetIsB2B)
+    setCart(nextCart)
+    setCheckoutOpen(false)
+    setCheckoutStep('cart')
+    setClientOrdersOpen(false)
+    setCartOpen(true)
+    setCartError('Товары добавлены в корзину')
+  }
+
   const handleRepeatLastOrder = () => {
     if (!lastOrder) return
     const nextCart: Cart = {}
@@ -5601,7 +5685,10 @@ export default function App() {
       nextCart[item.productId] = item.volume
     })
     setCart(nextCart)
+    setCheckoutOpen(false)
+    setCheckoutStep('cart')
     setCartOpen(true)
+    setCartError('Товары добавлены в корзину')
   }
 
   return (
@@ -5647,7 +5734,10 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setCartOpen(true)}
+                onClick={() => {
+                  setCheckoutStep('cart')
+                  setCartOpen(true)
+                }}
                 className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-95"
                 aria-label={`Корзина: ${cartCount} позиций`}
               >
@@ -6157,14 +6247,6 @@ export default function App() {
                 {cartError && (
                   <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
                     {cartError}
-                    <a
-                      href={getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 block font-bold text-amber-950 underline"
-                    >
-                      Открыть WhatsApp вручную
-                    </a>
                   </div>
                 )}
                 <div className="mb-3 flex items-center justify-between gap-3 text-slate-800">
@@ -6200,7 +6282,10 @@ export default function App() {
       {cartCount > 0 && (
         <button
           type="button"
-          onClick={() => setCartOpen(true)}
+          onClick={() => {
+            setCheckoutStep('cart')
+            setCartOpen(true)
+          }}
           className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-700 text-white shadow-xl transition hover:bg-brand-800 active:scale-95 lg:hidden"
           aria-label={`Открыть корзину: ${cartCount} позиций`}
         >
@@ -6272,89 +6357,56 @@ export default function App() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              {checkoutStep === 'cart' ? (
-                cartLines.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-slate-500">
-                    Корзина пуста. Добавьте овощи из каталога.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {cartLines.map((line) => (
-                      <li
-                        key={line.product.id}
-                        className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
-                      >
-                        {line.product.image ? (
-                          <img
-                            src={line.product.image}
-                            alt=""
-                            className="h-16 w-16 shrink-0 rounded-lg object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
-                            Фото скоро
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="font-semibold text-slate-800">{line.product.name}</p>
-                            <button
-                              type="button"
-                              onClick={() => removeFromCart(line.product.id)}
-                              className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
-                              aria-label={`Удалить ${line.product.name} из корзины`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                          <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
-                          <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
-                            {formatCurrency(line.total)}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )
+              {cartLines.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-500">
+                  Корзина пуста. Добавьте овощи из каталога.
+                </p>
               ) : (
-                <form
-                  className="space-y-4"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    handleSubmitCheckout()
-                  }}
-                >
-                  <CheckoutFormContent
-                    checkoutStep={checkoutStep}
-                    checkoutForm={checkoutForm}
-                    checkoutErrors={checkoutErrors}
-                    checkoutSubmitError={checkoutSubmitError}
-                    checkoutSuccessMessage={checkoutSuccessMessage}
-                    isSubmittingOrder={isSubmittingOrder}
-                    cartCount={cartCount}
-                    cartGrandTotal={cartGrandTotal}
-                    isB2B={isB2B}
-                    cartLines={cartLines}
-                    onBack={() => setCheckoutStep('cart')}
-                    updateCheckoutField={updateCheckoutField}
-                  />
-                </form>
+                <ul className="space-y-3">
+                  {cartLines.map((line) => (
+                    <li
+                      key={line.product.id}
+                      className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    >
+                      {line.product.image ? (
+                        <img
+                          src={line.product.image}
+                          alt=""
+                          className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 px-2 text-center text-[10px] font-semibold leading-tight text-slate-500">
+                          Фото скоро
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-semibold text-slate-800">{line.product.name}</p>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(line.product.id)}
+                            className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                            aria-label={`Удалить ${line.product.name} из корзины`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <p className="mt-0.5 text-sm text-slate-600">{line.volumeLabel}</p>
+                        <p className="mt-1 text-base font-bold tabular-nums text-brand-800">
+                          {formatCurrency(line.total)}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
-            {checkoutStep === 'cart' && cartLines.length > 0 && (
+            {cartLines.length > 0 && (
               <div className="border-t border-slate-100 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
                 {cartError && (
                   <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
                     {cartError}
-                    <a
-                      href={getCartWhatsAppUrl(cartLines, cartGrandTotal, isB2B)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 block font-bold text-amber-950 underline"
-                    >
-                      Открыть WhatsApp вручную
-                    </a>
                   </div>
                 )}
                 <p className="mb-3 text-center text-lg font-bold text-slate-800">
@@ -6365,7 +6417,7 @@ export default function App() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setCheckoutStep('details')}
+                  onClick={handleBookCart}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-4 text-base font-bold text-white shadow-lg transition active:scale-[0.98] hover:bg-[#1ebe5d]"
                 >
                   Продолжить оформление
@@ -6477,6 +6529,12 @@ export default function App() {
                 </div>
               )}
 
+              {clientOrdersSuccess && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                  {clientOrdersSuccess}
+                </div>
+              )}
+
               {hasSearchedClientOrders && !isLoadingClientOrders && !clientOrdersError && clientOrders.length === 0 && (
                 <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm font-medium text-slate-500">
                   На этом устройстве заказов пока нет. Оформите заказ, и он появится здесь.
@@ -6560,6 +6618,30 @@ export default function App() {
                           </ul>
                         )}
                       </div>
+                      {(order.items.length > 0 ||
+                        (!order.archived_at && (order.status === 'new' || order.status === 'processing'))) && (
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                          {order.items.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => repeatClientOrder(order)}
+                              className="w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-bold text-brand-800 transition hover:bg-brand-100 sm:w-auto"
+                            >
+                              Повторить заказ
+                            </button>
+                          )}
+                          {!order.archived_at && (order.status === 'new' || order.status === 'processing') && (
+                            <button
+                              type="button"
+                              onClick={() => void cancelClientOrder(order)}
+                              disabled={cancellingClientOrderId === order.id}
+                              className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-wait disabled:opacity-70 sm:w-auto"
+                            >
+                              {cancellingClientOrderId === order.id ? 'Отменяем...' : 'Отменить заказ'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>
