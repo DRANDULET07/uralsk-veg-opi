@@ -4192,6 +4192,7 @@ export default function App() {
   const [clientOrdersOpen, setClientOrdersOpen] = useState(false)
   const [clientOrders, setClientOrders] = useState<AdminOrder[]>([])
   const [clientOrdersError, setClientOrdersError] = useState<string | null>(null)
+  const [hasStoredOrderIds, setHasStoredOrderIds] = useState(false)
   const [hasSearchedClientOrders, setHasSearchedClientOrders] = useState(false)
   const [isLoadingClientOrders, setIsLoadingClientOrders] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -4313,6 +4314,7 @@ export default function App() {
   useEffect(() => {
     const storedLastOrder = localStorage.getItem(LOCAL_STORAGE_LAST_ORDER)
     const storedHistory = localStorage.getItem(LOCAL_STORAGE_HISTORY)
+    setHasStoredOrderIds(getStoredOrderIds().length > 0)
 
     if (storedLastOrder) {
       try {
@@ -4661,6 +4663,7 @@ export default function App() {
     try {
       const createdOrderId = await saveCheckoutOrderToSupabase(normalizedPhone)
       saveOrderIdToLocalStorage(createdOrderId)
+      setHasStoredOrderIds(true)
 
       const whatsappUrl = getCartWhatsAppUrl(
         cartLines,
@@ -4822,6 +4825,7 @@ export default function App() {
                 }}
                 className="hidden rounded-full bg-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:inline-flex"
               >
+                <Package className="mr-2 h-4 w-4" strokeWidth={2} />
                 Мои заказы
               </button>
               <button
@@ -4830,10 +4834,14 @@ export default function App() {
                   setClientOrdersOpen(true)
                   void loadClientOrders()
                 }}
-                className="flex h-10 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:hidden"
+                className="relative flex h-10 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-bold text-white transition hover:bg-white/25 active:scale-95 sm:hidden"
                 aria-label="Мои заказы"
               >
-                Мои
+                <Package className="mr-2 h-4 w-4" strokeWidth={2} />
+                Заказы
+                {hasStoredOrderIds && (
+                  <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
+                )}
               </button>
               <button
                 type="button"
