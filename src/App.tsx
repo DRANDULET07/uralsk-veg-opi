@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Download,
   Lock,
-  LogOut,
   MapPin,
   Minus,
   Package,
@@ -4083,7 +4082,7 @@ function AdminPage() {
     setLoginLoading(false)
   }
 
-  const handleLogout = async () => {
+  const endAdminSession = async () => {
     await supabase.auth.signOut()
     setAdminSession(null)
     setAdminUser(null)
@@ -4396,10 +4395,10 @@ function AdminPage() {
           {loginError && <p className="mb-4 text-sm font-medium text-red-600">{loginError}</p>}
           <button
             type="button"
-            onClick={() => void handleLogout()}
+            onClick={() => void endAdminSession()}
             className="w-full rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white shadow-lg shadow-brand-700/20 transition hover:bg-brand-800 active:scale-[0.98]"
           >
-            Выйти
+            Сменить аккаунт
           </button>
         </div>
       </div>
@@ -4467,32 +4466,34 @@ function AdminPage() {
   return (
     <div className="min-h-dvh bg-slate-100 px-4 py-6 lg:px-6">
       <div className="mx-auto w-full max-w-[1400px]">
-        <nav className="mb-4 flex flex-wrap gap-2 rounded-2xl bg-white p-2 shadow-lg shadow-slate-200/60">
-          {ADMIN_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveAdminTab(tab.id)}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                activeAdminTab === tab.id
-                  ? 'bg-brand-700 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-brand-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-2 px-2">
+        <nav className="mb-4 grid grid-cols-4 items-center gap-2 rounded-2xl bg-white p-2 shadow-lg shadow-slate-200/60 sm:flex sm:flex-row sm:flex-wrap">
+          <div className="contents sm:flex sm:flex-wrap sm:gap-2">
+            {ADMIN_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveAdminTab(tab.id)}
+                className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                  activeAdminTab === tab.id
+                    ? 'bg-brand-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-brand-800'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="contents sm:ml-auto sm:flex sm:items-center sm:gap-2">
             <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-500 sm:inline">
               {adminProfile?.email} · {adminRole}
             </span>
             <button
               type="button"
-              onClick={() => void handleLogout()}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+              onClick={() => void endAdminSession()}
+              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
             >
-              <LogOut className="h-4 w-4" />
-              Выйти
+              <span>Выйти</span>
             </button>
           </div>
         </nav>
@@ -4510,15 +4511,6 @@ function AdminPage() {
                 Новые сверху · данные из Supabase
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-white transition hover:bg-white/20 sm:h-auto sm:w-auto sm:gap-2 sm:px-4 sm:py-2 sm:text-sm sm:font-bold"
-              aria-label="Выйти"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Выйти</span>
-            </button>
           </div>
 
           <div className="mt-3 rounded-2xl border border-white/10 bg-white/10 p-2 sm:mt-5 sm:p-3">
