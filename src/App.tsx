@@ -4,6 +4,7 @@ import {
   Archive,
   CalendarCheck,
   CheckCircle2,
+  Download,
   Leaf,
   Lock,
   LogOut,
@@ -3511,6 +3512,286 @@ function AdminPage() {
     }
   }
 
+  const downloadExcelReport = async () => {
+    type ExcelValue = string | number | null
+    type ExcelRow = Record<string, ExcelValue>
+    type AddSheetOptions = {
+      autoFilter?: boolean
+      headers?: string[]
+    }
+    type ReportClientData = {
+      id: string
+      name: string
+      phone: string
+      client_type: string
+      client_note: string | null
+    }
+
+    const formatExcelDate = (value: string | null | undefined) => {
+      if (!value) return ''
+      const date = new Date(value)
+      return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ru-RU')
+    }
+    const roundMoney = (value: number) => Math.round(Number(value) || 0)
+    const roundKg = (value: number) => Math.round((Number(value) || 0) * 100) / 100
+
+    try {
+      setOrdersError(null)
+      const XLSX = await import('xlsx')
+      const addSheet = (
+        workbook: import('xlsx').WorkBook,
+        name: string,
+        rows: ExcelRow[],
+        options: AddSheetOptions = {},
+      ) => {
+        const headers = options.headers ?? (rows[0] ? Object.keys(rows[0]) : [])
+        const sheet = XLSX.utils.aoa_to_sheet([
+          headers,
+          ...rows.map((row) => headers.map((header) => row[header] ?? '')),
+        ])
+        sheet['!cols'] = headers.map((header, index) => {
+          const maxLength = Math.max(
+            header.length,
+            ...rows.map((row) => String(row[header] ?? '').length),
+          )
+          const width = Math.min(Math.max(maxLength + 2, index === 0 ? 18 : 12), 48)
+          return { wch: width }
+        })
+
+        const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
+        if (range) {
+          for (let column = range.s.c; column <= range.e.c; column += 1) {
+            const headerCell = sheet[XLSX.utils.encode_cell({ r: 0, c: column })]
+            if (headerCell) {
+              headerCell.s = { ...(headerCell.s ?? {}), font: { bold: true } }
+            }
+          }
+          if (options.autoFilter && range.e.r > 0) {
+            sheet['!autofilter'] = { ref: XLSX.utils.encode_range(range) }
+          }
+        }
+
+        XLSX.utils.book_append_sheet(workbook, sheet, name)
+      }
+
+      const { data: clientsData, error: clientsError } = await supabase
+        .from('clients')
+        .select('id, name, phone, client_type, client_note')
+
+      if (clientsError) throw clientsError
+
+      const clients = ((clientsData ?? []) as Record<string, unknown>[]).map<ReportClientData>((client) => ({
+        id: String(client.id ?? ''),
+        name: String(client.name ?? ''),
+        phone: String(client.phone ?? ''),
+        client_type: String(client.client_type ?? ''),
+        client_note: typeof client.client_note === 'string' ? client.client_note : null,
+      }))
+      const clientsById = new Map(clients.map((client) => [client.id, client]))
+      const clientsByPhone = new Map(
+        clients
+          .map((client) => [normalizePhone(client.phone), client] as const)
+          .filter(([phone]) => phone.length > 0),
+      )
+
+      const workbook = XLSX.utils.book_new()
+      const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
+
+      addSheet(
+        workbook,
+        'Сводка',
+        [
+          { Показатель: 'Период отчёта', Значение: periodLabel },
+          { Показатель: 'Выручка', Значение: roundMoney(orderAnalytics.completedRevenue) },
+          { Показатель: 'Ожидаемая сумма', Значение: roundMoney(orderAnalytics.expectedAmount) },
+          { Показатель: 'Отменённая сумма', Значение: roundMoney(orderAnalytics.cancelledAmount) },
+          { Показатель: 'Общий оборот', Значение: roundMoney(orderAnalytics.totalTurnover) },
+          { Показатель: 'Средний чек', Значение: roundMoney(orderAnalytics.averageCheck) },
+          { Показатель: 'Количество заказов', Значение: reportFilteredOrders.length },
+          { Показатель: 'Всего кг', Значение: roundKg(orderAnalytics.totalWeightKg) },
+          { Показатель: 'Выполнено кг', Значение: roundKg(orderAnalytics.completedWeightKg) },
+          { Показатель: 'Ожидается кг', Значение: roundKg(orderAnalytics.expectedWeightKg) },
+          { Показатель: 'Отменено кг', Значение: roundKg(orderAnalytics.cancelledWeightKg) },
+        ],
+        { headers: ['Показатель', 'Значение'] },
+      )
+
+      addSheet(
+        workbook,
+        'Заказы',
+        reportFilteredOrders.map((order) => ({
+          'Дата заказа': formatExcelDate(order.created_at),
+          'Номер/ID заказа': order.id,
+          'Имя клиента': order.customer_name || '',
+          Телефон: formatPhoneForDisplay(normalizePhone(order.customer_phone)),
+          'Тип заказа': order.order_type || '',
+          Получение: order.receiving_type || '',
+          Статус: ADMIN_STATUS_LABELS[order.status],
+          Сумма: roundMoney(order.total_amount),
+          'Общий вес': roundKg(order.total_weight_kg),
+          'Адрес доставки': order.delivery_address ?? '',
+          'Комментарий клиента': order.comment ?? '',
+          'Заметка работника': order.staff_note ?? '',
+        })),
+        {
+          autoFilter: true,
+          headers: [
+            'Дата заказа',
+            'Номер/ID заказа',
+            'Имя клиента',
+            'Телефон',
+            'Тип заказа',
+            'Получение',
+            'Статус',
+            'Сумма',
+            'Общий вес',
+            'Адрес доставки',
+            'Комментарий клиента',
+            'Заметка работника',
+          ],
+        },
+      )
+
+      const productTotals = new Map<
+        string,
+        {
+          productName: string
+          orderIds: Set<string>
+          positionCount: number
+          totalQuantityKg: number
+          totalAmount: number
+        }
+      >()
+      reportFilteredOrders.forEach((order) => {
+        order.items.forEach((item) => {
+          const productName = item.product_name || 'Товар'
+          const current = productTotals.get(productName) ?? {
+            productName,
+            orderIds: new Set<string>(),
+            positionCount: 0,
+            totalQuantityKg: 0,
+            totalAmount: 0,
+          }
+          current.orderIds.add(order.id)
+          current.positionCount += 1
+          current.totalQuantityKg += item.quantity_kg
+          current.totalAmount += item.total_amount
+          productTotals.set(productName, current)
+        })
+      })
+
+      addSheet(
+        workbook,
+        'Товары',
+        Array.from(productTotals.values())
+          .sort((a, b) => b.totalAmount - a.totalAmount)
+          .map((item) => ({
+            'Название товара': item.productName,
+            'Количество заказов': item.orderIds.size,
+            'Количество позиций': item.positionCount,
+            'Общий вес кг': roundKg(item.totalQuantityKg),
+            'Общая сумма': roundMoney(item.totalAmount),
+            'Средняя цена за кг': item.totalQuantityKg > 0 ? roundMoney(item.totalAmount / item.totalQuantityKg) : 0,
+          })),
+        {
+          autoFilter: true,
+          headers: [
+            'Название товара',
+            'Количество заказов',
+            'Количество позиций',
+            'Общий вес кг',
+            'Общая сумма',
+            'Средняя цена за кг',
+          ],
+        },
+      )
+
+      const clientTotals = new Map<
+        string,
+        {
+          name: string
+          phone: string
+          clientType: string
+          clientNote: string | null
+          orderCount: number
+          totalAmount: number
+          lastOrderAt: string | null
+        }
+      >()
+      reportFilteredOrders.forEach((order) => {
+        const normalizedPhone = normalizePhone(order.customer_phone)
+        const linkedClient =
+          (order.client_id ? clientsById.get(order.client_id) : undefined) ??
+          clientsByPhone.get(normalizedPhone)
+        const key = linkedClient?.id || normalizedPhone || `${order.customer_name}-${order.customer_phone}`
+        const current = clientTotals.get(key) ?? {
+          name: linkedClient?.name || order.customer_name || '',
+          phone: linkedClient?.phone || order.customer_phone || '',
+          clientType: linkedClient?.client_type || order.client_type || '',
+          clientNote: linkedClient?.client_note ?? null,
+          orderCount: 0,
+          totalAmount: 0,
+          lastOrderAt: null,
+        }
+        const currentLastTime = current.lastOrderAt ? new Date(current.lastOrderAt).getTime() : 0
+        const nextLastTime = new Date(order.created_at).getTime()
+        clientTotals.set(key, {
+          ...current,
+          orderCount: current.orderCount + 1,
+          totalAmount: current.totalAmount + order.total_amount,
+          lastOrderAt:
+            !Number.isNaN(nextLastTime) && nextLastTime > currentLastTime
+              ? order.created_at
+              : current.lastOrderAt,
+        })
+      })
+
+      addSheet(
+        workbook,
+        'Клиенты',
+        Array.from(clientTotals.values())
+          .sort((a, b) => b.totalAmount - a.totalAmount)
+          .map((client) => {
+            const stats = {
+              orderCount: client.orderCount,
+              totalAmount: client.totalAmount,
+              averageAmount: client.orderCount > 0 ? client.totalAmount / client.orderCount : 0,
+              lastOrderAt: client.lastOrderAt,
+            }
+
+            return {
+              'Имя клиента': client.name,
+              Телефон: formatPhoneForDisplay(normalizePhone(client.phone)),
+              'Количество заказов': stats.orderCount,
+              'Общая сумма': roundMoney(stats.totalAmount),
+              'Средний чек': roundMoney(stats.averageAmount),
+              'Последний заказ': formatExcelDate(stats.lastOrderAt),
+              Статус: getAdminClientStatus(stats).label,
+              'Заметка работника': client.clientNote ?? '',
+            }
+          }),
+        {
+          autoFilter: true,
+          headers: [
+            'Имя клиента',
+            'Телефон',
+            'Количество заказов',
+            'Общая сумма',
+            'Средний чек',
+            'Последний заказ',
+            'Статус',
+            'Заметка работника',
+          ],
+        },
+      )
+
+      const fileDate = new Date().toISOString().slice(0, 10)
+      XLSX.writeFile(workbook, `uralsk-veg-report-${fileDate}.xlsx`)
+    } catch (error) {
+      setOrdersError(`Не удалось скачать отчёт: ${getErrorMessage(error)}`)
+    }
+  }
+
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (password !== ADMIN_PASSWORD) {
@@ -4417,13 +4698,23 @@ function AdminPage() {
                 <p className="text-sm font-bold text-brand-700">
                   {reportFilteredOrders.length} заказов
                 </p>
-                <button
-                  type="button"
-                  onClick={() => void copyReportToClipboard()}
-                  className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-100"
-                >
-                  {reportCopied ? 'Отчёт скопирован' : 'Скопировать отчёт'}
-                </button>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => void copyReportToClipboard()}
+                    className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800 transition hover:bg-brand-100"
+                  >
+                    {reportCopied ? 'Отчёт скопирован' : 'Скопировать отчёт'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadExcelReport()}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-brand-800"
+                  >
+                    <Download className="h-4 w-4" />
+                    Скачать отчёт
+                  </button>
+                </div>
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
