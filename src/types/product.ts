@@ -42,9 +42,6 @@ export interface Product {
   retailStockKg?: number
   analyticsTitle: string
   analyticsText: string
-  trackStatus?: null
-  trackSteps?: string[]
-  trackCurrent?: number
 }
 
 export type ProductUpdate = Partial<

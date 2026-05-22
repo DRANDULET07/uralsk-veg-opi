@@ -264,7 +264,6 @@ const fallbackProducts: Product[] = [
     retailStockKg: 42,
     analyticsTitle: '?? Аналитика рынка: цена стабильна',
     analyticsText: 'На рынке Уральска стабильный объем местного картофеля. В ближайшие 2 недели ценовых скачков не ожидается, запасы на складе в избытке.',
-    trackStatus: null,
   },
   {
     id: 'onion',
@@ -286,7 +285,6 @@ const fallbackProducts: Product[] = [
     retailStockKg: 38,
     analyticsTitle: '?? Скидки: сезонное снижение цены',
     analyticsText: 'Поступил крупный объем репчатого лука высокого качества. При закупке от 5 тонн действуют специальные оптовые условия.',
-    trackStatus: null,
   },
   {
     id: 'carrot',
@@ -308,8 +306,6 @@ const fallbackProducts: Product[] = [
     retailStockKg: 25,
     analyticsTitle: '?? Прогноз: ожидается подорожание к концу недели',
     analyticsText: 'Из-за задержек крупных фур на КПП Маштаково прогнозируется временный дефицит свежей моркови. Рекомендуем зафиксировать объемы.',
-    trackSteps: ['Отгружено (Ташкент)', 'Граница (КПП Маштаково)', 'Склад №1 (Уральск)'],
-    trackCurrent: 1,
   },
   {
     id: 'tomato',
@@ -331,7 +327,6 @@ const fallbackProducts: Product[] = [
     retailStockKg: 50,
     analyticsTitle: '?? Аналитика: высокий спрос',
     analyticsText: 'Тепличные томаты пользуются повышенным спросом перед выходными. Объемы на Складе №2 (Охлаждаемый) тают быстро, планируйте закуп заранее.',
-    trackStatus: null,
   },
   {
     id: 'cabbage',
@@ -353,7 +348,6 @@ const fallbackProducts: Product[] = [
     retailStockKg: 44,
     analyticsTitle: '?? Аналитика рынка: цена стабильна',
     analyticsText: 'Белокочанная капуста зафиксировалась в цене. Качество партии отличное, листы плотные, товар готов к длительной транспортировке.',
-    trackStatus: null,
   },
 ]
 
@@ -480,6 +474,7 @@ function getMinimumOrderKg(isB2B: boolean): number {
 }
 
 function canOrderProduct(product: Product, isB2B: boolean): boolean {
+  if (product.in_stock === false && product.is_in_transit !== true) return false
   return getAvailableStockKg(product) >= getMinimumOrderKg(isB2B)
 }
 
@@ -893,7 +888,7 @@ function matchesWarehouse(product: Product, warehouse: WarehouseFilterId): boole
 
 function matchesInStockOnly(product: Product, onlyInStock: boolean): boolean {
   if (!onlyInStock) return true
-  return product.availability === 'warehouse'
+  return product.availability === 'warehouse' && product.in_stock !== false
 }
 
 function sortProducts(products: Product[], sortBy: SortOption): Product[] {
@@ -1719,7 +1714,7 @@ function AdminProductsPanel() {
               <input className={textInputClass} value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
             </label>
             <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Вариант</span>
+              <span className="text-sm font-semibold text-slate-700">Вариант / сорт / фасовка</span>
               <input className={textInputClass} value={form.variant} onChange={(e) => updateForm('variant', e.target.value)} />
             </label>
             <label className="block">
@@ -1755,15 +1750,20 @@ function AdminProductsPanel() {
               <input className={textInputClass} value={form.location} onChange={(e) => updateForm('location', e.target.value)} />
             </label>
             <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Origin</span>
+              <span className="text-sm font-semibold text-slate-700">Откуда товар</span>
               <input className={textInputClass} value={form.origin} onChange={(e) => updateForm('origin', e.target.value)} />
             </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">Ожидаемая поставка</span>
               <input className={textInputClass} value={form.delivery_eta} onChange={(e) => updateForm('delivery_eta', e.target.value)} />
+              {form.is_in_transit && (
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  Этот текст увидит клиент в блоке Товар в пути.
+                </p>
+              )}
             </label>
             <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">image_url</span>
+              <span className="text-sm font-semibold text-slate-700">Ссылка на фото</span>
               <input className={textInputClass} value={form.image_url} onChange={(e) => updateForm('image_url', e.target.value)} />
             </label>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2 xl:col-span-1">
@@ -1861,8 +1861,8 @@ function AdminProductsPanel() {
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">Локация</dt><dd className="font-semibold text-slate-800">{product.location || '-'}</dd></div>
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">Наличие</dt><dd className="font-semibold text-slate-800">{product.in_stock ? 'В наличии' : 'Нет в наличии'}</dd></div>
                       <div><dt className="text-xs font-semibold uppercase text-slate-400">В пути</dt><dd className="font-semibold text-slate-800">{product.is_in_transit ? 'Да' : 'Нет'}</dd></div>
-                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Поставка</dt><dd className="font-semibold text-slate-800">{product.delivery_eta || '-'}</dd></div>
-                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Origin</dt><dd className="font-semibold text-slate-800">{product.origin || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Ожидаемая поставка</dt><dd className="font-semibold text-slate-800">{product.delivery_eta || '-'}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-400">Откуда товар</dt><dd className="font-semibold text-slate-800">{product.origin || '-'}</dd></div>
                     </dl>
                     {product.description && <p className="mt-3 text-sm text-slate-600">{product.description}</p>}
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -3885,6 +3885,9 @@ export default function App() {
             : product.wholesale_price ?? product.basePrice
           const primaryPriceLabel = isB2B ? 'Оптовая цена' : 'Розничная цена'
           const secondaryPriceLabel = isB2B ? 'Розница' : 'Опт'
+          const deliveryEta = product.delivery_eta?.trim() || 'Скоро'
+          const isProductInStock = product.in_stock !== false
+          const isUnavailable = product.in_stock === false && product.is_in_transit !== true
 
           return (
             <article
@@ -3924,7 +3927,7 @@ export default function App() {
                   <span
                     className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-bold ${statusToneClass[product.statusTone]}`}
                   >
-                    {product.is_in_transit ? 'В пути' : stockDisplay.stock > 0 ? 'В наличии' : 'Нет'}
+                    {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет'}
                   </span>
                 </div>
 
@@ -3958,9 +3961,28 @@ export default function App() {
                   </div>
                 </div>
 
-                <p className={`inline-flex rounded-full border px-3 py-1.5 text-sm font-bold ${stockDisplay.className}`}>
-                  {stockDisplay.label}
-                </p>
+                {product.is_in_transit ? (
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                    <div className="flex items-center gap-2 font-bold">
+                      <Truck className="h-4 w-4 text-sky-600" aria-hidden />
+                      Товар в пути
+                    </div>
+                    <p className="mt-1 font-semibold">Фура в пути</p>
+                    <p className="mt-1 text-sky-800">Ожидаемая поставка: {deliveryEta}</p>
+                  </div>
+                ) : isProductInStock ? (
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                    <div className="flex items-center gap-2 font-bold">
+                      <Package className="h-4 w-4 text-emerald-600" aria-hidden />
+                      На складе
+                    </div>
+                    <p className="mt-1 text-emerald-800">Доступно для заказа</p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                    Нет в наличии
+                  </div>
+                )}
                 <p className="flex items-center gap-1.5 text-sm text-slate-600">
                   <Scale className="h-4 w-4 text-brand-600" aria-hidden />
                   {isB2B ? 'Минимальный заказ от 25 кг' : 'Можно заказать от 1 кг'}
@@ -3979,42 +4001,6 @@ export default function App() {
                   )}
                   {product.location}
                 </p>
-
-                {product.trackSteps && product.trackCurrent !== undefined && (
-                  <div className="rounded-2xl bg-slate-50 p-4 text-sm">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Truck className="h-5 w-5 text-sky-600" aria-hidden />
-                      <span className="font-bold text-slate-800">Трек доставки</span>
-                    </div>
-                    <div className="space-y-3 border-l border-slate-200 pl-4">
-                      {product.trackSteps.map((step, idx) => {
-                        const isActive = idx === product.trackCurrent
-                        const isCompleted = idx < product.trackCurrent!
-                        return (
-                          <div key={idx} className="flex items-center gap-3">
-                            <span
-                              className={`-ml-[23px] flex h-3.5 w-3.5 rounded-full ring-4 ring-slate-50 ${
-                                isActive
-                                  ? 'animate-pulse bg-emerald-500'
-                                  : isCompleted
-                                    ? 'bg-emerald-500'
-                                    : 'bg-slate-300'
-                              }`}
-                            />
-                            <span
-                              className={`text-sm ${
-                                isActive ? 'font-bold text-slate-800' : 'text-slate-600'
-                              }`}
-                            >
-                              {step}
-                            </span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-slate-700">
                   <button
                     type="button"
@@ -4071,7 +4057,7 @@ export default function App() {
                   <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />
                   <span className="sm:hidden">
                     {cannotOrderProduct
-                      ? stockDisplay.stock <= 0
+                      ? isUnavailable || stockDisplay.stock <= 0
                         ? 'Нет в наличии'
                         : 'Недостаточно остатка'
                       : justAdded
@@ -4082,7 +4068,7 @@ export default function App() {
                   </span>
                   <span className="hidden sm:inline">
                     {cannotOrderProduct
-                      ? stockDisplay.stock <= 0
+                      ? isUnavailable || stockDisplay.stock <= 0
                         ? 'Нет в наличии'
                         : 'Недостаточно остатка'
                       : justAdded

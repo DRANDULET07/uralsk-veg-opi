@@ -112,11 +112,6 @@ function normalizeProduct(row: ProductRow, index: number): Product {
     retailStockKg: stockAmount,
     analyticsTitle: asString(row.freshness) ?? 'Актуальная рыночная информация',
     analyticsText: description ?? 'Данные по товару загружены из Supabase.',
-    trackStatus: null,
-    trackSteps: isInTransit
-      ? ['Отгружено', asString(row.delivery_eta) ?? 'В пути', location]
-      : undefined,
-    trackCurrent: isInTransit ? 1 : undefined,
   }
 }
 
