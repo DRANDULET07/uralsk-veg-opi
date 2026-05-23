@@ -23,6 +23,7 @@ export interface Product {
   is_in_transit?: boolean | null
   delivery_eta?: string | null
   is_active?: boolean | null
+  is_popular?: boolean | null
   created_at?: string | null
   updated_at?: string | null
 

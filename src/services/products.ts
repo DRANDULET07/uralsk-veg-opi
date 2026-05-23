@@ -96,6 +96,7 @@ function normalizeProduct(row: ProductRow): Product {
     is_in_transit: isInTransit,
     delivery_eta: asString(row.delivery_eta) ?? null,
     is_active: asBoolean(row.is_active) ?? true,
+    is_popular: asBoolean(row.is_popular) ?? null,
     created_at: asString(row.created_at) ?? null,
     updated_at: asString(row.updated_at) ?? null,
 
