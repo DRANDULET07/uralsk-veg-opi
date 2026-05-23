@@ -248,6 +248,9 @@ create policy owner_delete_products
 -- Deleting a client must not delete related orders.
 
 alter table public.clients
+  add column if not exists client_status text default 'regular';
+
+alter table public.clients
   enable row level security;
 
 drop policy if exists "admin_read_clients"

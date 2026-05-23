@@ -41,6 +41,7 @@ type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
 type AdminStatusFilter = AdminOrderStatus | 'all'
 type AdminTab = 'orders' | 'products' | 'clients'
 type AdminReportStatusMode = AdminStatusFilter | 'active'
+type ClientManualStatus = 'regular' | 'frequent' | 'vip'
 type AdminPeriodPreset =
   | 'today'
   | 'last7'
@@ -147,6 +148,7 @@ interface AdminClient {
   name: string
   phone: string
   client_type: string
+  client_status?: ClientManualStatus | null
   client_note?: string | null
   created_at?: string | null
   updated_at?: string | null
@@ -237,6 +239,18 @@ const ADMIN_STATUS_OPTIONS: { id: AdminStatusFilter; label: string }[] = [
   { id: 'processing', label: ADMIN_STATUS_LABELS.processing },
   { id: 'completed', label: ADMIN_STATUS_LABELS.completed },
   { id: 'cancelled', label: ADMIN_STATUS_LABELS.cancelled },
+]
+
+const CLIENT_MANUAL_STATUS_LABELS: Record<ClientManualStatus, string> = {
+  regular: 'Обычный',
+  frequent: 'Постоянный',
+  vip: 'VIP',
+}
+
+const CLIENT_MANUAL_STATUS_OPTIONS: { id: ClientManualStatus; label: string }[] = [
+  { id: 'regular', label: CLIENT_MANUAL_STATUS_LABELS.regular },
+  { id: 'frequent', label: CLIENT_MANUAL_STATUS_LABELS.frequent },
+  { id: 'vip', label: CLIENT_MANUAL_STATUS_LABELS.vip },
 ]
 
 const ADMIN_PERIOD_OPTIONS: { id: AdminPeriodPreset; label: string }[] = [
@@ -1484,6 +1498,20 @@ function getAdminClientStatus(stats: AdminClientStats): { label: string; classNa
   }
 }
 
+function normalizeClientManualStatus(value: unknown): ClientManualStatus {
+  return value === 'frequent' || value === 'vip' || value === 'regular' ? value : 'regular'
+}
+
+function getClientManualStatusClass(status: ClientManualStatus): string {
+  const classes: Record<ClientManualStatus, string> = {
+    regular: 'border-slate-200 bg-slate-100 text-slate-700',
+    frequent: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    vip: 'border-amber-200 bg-amber-50 text-amber-800',
+  }
+
+  return classes[status]
+}
+
 function toAdminProduct(row: Record<string, unknown>): AdminProduct {
   return {
     id: String(row.id ?? ''),
@@ -1629,9 +1657,11 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
 function AdminClientsPanel({
   canDeleteClients = false,
   canEditClientNotes = false,
+  canEditClientStatus = false,
 }: {
   canDeleteClients?: boolean
   canEditClientNotes?: boolean
+  canEditClientStatus?: boolean
 }) {
   const [clients, setClients] = useState<AdminClient[]>([])
   const [clientStats, setClientStats] = useState<Record<string, AdminClientStats>>({})
@@ -1641,6 +1671,7 @@ function AdminClientsPanel({
   const [editingClientNoteId, setEditingClientNoteId] = useState<string | null>(null)
   const [clientNoteDraft, setClientNoteDraft] = useState('')
   const [savingClientNoteId, setSavingClientNoteId] = useState<string | null>(null)
+  const [savingClientStatusId, setSavingClientStatusId] = useState<string | null>(null)
   const [deletingClientId, setDeletingClientId] = useState<string | null>(null)
 
   const loadClients = async () => {
@@ -1699,6 +1730,7 @@ function AdminClientsPanel({
           name: String(client.name ?? ''),
           phone: String(client.phone ?? ''),
           client_type: String(client.client_type ?? ''),
+          client_status: normalizeClientManualStatus(client.client_status),
           client_note: typeof client.client_note === 'string' ? client.client_note : null,
           created_at: typeof client.created_at === 'string' ? client.created_at : null,
           updated_at: typeof client.updated_at === 'string' ? client.updated_at : null,
@@ -1729,6 +1761,7 @@ function AdminClientsPanel({
         client.phone,
         formatPhoneForDisplay(normalizePhone(client.phone)),
         client.client_type,
+        CLIENT_MANUAL_STATUS_LABELS[normalizeClientManualStatus(client.client_status)],
         client.client_note ?? '',
       ]
         .join(' ')
@@ -1791,6 +1824,42 @@ function AdminClientsPanel({
       setError(`Не удалось сохранить заметку клиента: ${getErrorMessage(saveError)}`)
     } finally {
       setSavingClientNoteId(null)
+    }
+  }
+
+  const changeClientStatus = async (client: AdminClient, nextStatus: ClientManualStatus) => {
+    if (!canEditClientStatus) {
+      setError('Нет доступа к изменению статуса клиента.')
+      return
+    }
+
+    if (normalizeClientManualStatus(client.client_status) === nextStatus) return
+
+    setSavingClientStatusId(client.id)
+    setError(null)
+
+    try {
+      const { data: updatedClient, error: updateError } = await supabase
+        .from('clients')
+        .update({ client_status: nextStatus })
+        .eq('id', client.id)
+        .select('id, client_status')
+        .maybeSingle()
+
+      if (updateError) throw updateError
+      if (!updatedClient?.id) throw new Error('Client status was not updated')
+
+      const normalizedStatus = normalizeClientManualStatus(updatedClient.client_status)
+      setClients((prev) =>
+        prev.map((item) =>
+          item.id === client.id ? { ...item, client_status: normalizedStatus } : item,
+        ),
+      )
+    } catch (statusError) {
+      console.error('Failed to change client status:', statusError)
+      setError('Не удалось изменить статус клиента')
+    } finally {
+      setSavingClientStatusId(null)
     }
   }
 
@@ -1890,6 +1959,7 @@ function AdminClientsPanel({
               lastOrderAt: null,
             }
             const status = getAdminClientStatus(stats)
+            const manualStatus = normalizeClientManualStatus(client.client_status)
             const normalizedPhone = normalizePhone(client.phone)
             const whatsappText = encodeURIComponent('Здравствуйте! Это URALSK VEG OPI по вашему заказу.')
             const hasNoOrders = stats.orderCount === 0
@@ -1914,8 +1984,15 @@ function AdminClientsPanel({
                     </a>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <span
+                      className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${getClientManualStatusClass(
+                        manualStatus,
+                      )}`}
+                    >
+                      Статус: {CLIENT_MANUAL_STATUS_LABELS[manualStatus]}
+                    </span>
                     <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${status.className}`}>
-                      {status.label}
+                      Подсказка сайта: {status.label}
                     </span>
                     {hasNoOrders && (
                       <span className="w-fit rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
@@ -1924,6 +2001,28 @@ function AdminClientsPanel({
                     )}
                   </div>
                 </div>
+
+                {canEditClientStatus && (
+                  <label className="mt-4 block max-w-xs">
+                    <span className="text-xs font-semibold uppercase text-slate-400">
+                      Статус клиента
+                    </span>
+                    <select
+                      value={manualStatus}
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                        void changeClientStatus(client, event.target.value as ClientManualStatus)
+                      }
+                      disabled={savingClientStatusId === client.id}
+                      className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 disabled:cursor-wait disabled:bg-slate-100 disabled:text-slate-500"
+                    >
+                      {CLIENT_MANUAL_STATUS_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                   <div className="rounded-2xl bg-slate-50 px-3 py-2">
@@ -3697,6 +3796,7 @@ function AdminPage() {
       name: string
       phone: string
       client_type: string
+      client_status: ClientManualStatus
       client_note: string | null
     }
 
@@ -3810,7 +3910,7 @@ function AdminPage() {
 
       const { data: clientsData, error: clientsError } = await supabase
         .from('clients')
-        .select('id, name, phone, client_type, client_note')
+        .select('id, name, phone, client_type, client_status, client_note')
 
       if (clientsError) throw clientsError
 
@@ -3819,6 +3919,7 @@ function AdminPage() {
         name: String(client.name ?? ''),
         phone: String(client.phone ?? ''),
         client_type: String(client.client_type ?? ''),
+        client_status: normalizeClientManualStatus(client.client_status),
         client_note: typeof client.client_note === 'string' ? client.client_note : null,
       }))
       const clientsById = new Map(clients.map((client) => [client.id, client]))
@@ -3997,6 +4098,7 @@ function AdminPage() {
           name: string
           phone: string
           clientType: string
+          clientStatus: ClientManualStatus
           clientNote: string | null
           orderCount: number
           totalAmount: number
@@ -4013,6 +4115,7 @@ function AdminPage() {
           name: linkedClient?.name || order.customer_name || '',
           phone: linkedClient?.phone || order.customer_phone || '',
           clientType: linkedClient?.client_type || order.client_type || '',
+          clientStatus: normalizeClientManualStatus(linkedClient?.client_status),
           clientNote: linkedClient?.client_note ?? null,
           orderCount: 0,
           totalAmount: 0,
@@ -4048,7 +4151,8 @@ function AdminPage() {
             'Общая сумма': formatExcelMoney(stats.totalAmount),
             'Средний чек': formatExcelMoney(stats.averageAmount),
             'Последний заказ': formatExcelDate(stats.lastOrderAt),
-            Статус: getAdminClientStatus(stats).label,
+            'Статус клиента': CLIENT_MANUAL_STATUS_LABELS[client.clientStatus],
+            'Подсказка сайта': getAdminClientStatus(stats).label,
             'Заметка работника': client.clientNote ?? '',
           }
         })
@@ -4079,7 +4183,8 @@ function AdminPage() {
             'Общая сумма',
             'Средний чек',
             'Последний заказ',
-            'Статус',
+            'Статус клиента',
+            'Подсказка сайта',
             'Заметка работника',
           ],
         },
@@ -5610,7 +5715,11 @@ function AdminPage() {
         ) : activeAdminTab === 'products' ? (
           <AdminProductsPanel canManageProducts={isOwner} />
         ) : (
-          <AdminClientsPanel canDeleteClients={isOwner} canEditClientNotes={isOwner} />
+          <AdminClientsPanel
+            canDeleteClients={isOwner}
+            canEditClientNotes={isOwner}
+            canEditClientStatus={isOwner}
+          />
         )}
       </div>
     </div>
