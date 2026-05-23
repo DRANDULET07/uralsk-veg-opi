@@ -34,7 +34,6 @@ const CLIENT_NOTE_MAX_LENGTH = 500
 type TabId = 'all' | 'warehouse' | 'transit'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
 type SortOption = 'default' | 'price-asc' | 'price-desc'
-type CustomerType = 'retail' | 'wholesale' | 'shop' | 'cafe'
 type OrderType = 'retail' | 'wholesale'
 type FulfillmentType = 'pickup' | 'delivery'
 type AdminOrderStatus = 'new' | 'processing' | 'completed' | 'cancelled'
@@ -90,7 +89,6 @@ interface MockOrder {
 interface CheckoutForm {
   name: string
   phone: string
-  customerType: CustomerType | ''
   orderType: OrderType | ''
   fulfillment: FulfillmentType | ''
   address: string
@@ -204,11 +202,9 @@ const RETAIL_MIN_ORDER_KG = 1
 const WHOLESALE_MIN_ORDER_KG = 25
 const QUANTITY_INPUT_MAX_LENGTH = 7
 
-const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
+const CUSTOMER_TYPE_LABELS: Record<OrderType, string> = {
   retail: 'Розница',
   wholesale: 'Оптовик',
-  shop: 'Магазин',
-  cafe: 'Кафе',
 }
 
 const ORDER_TYPE_LABELS: Record<OrderType, string> = {
@@ -263,7 +259,7 @@ const ADMIN_PERIOD_OPTIONS: { id: AdminPeriodPreset; label: string }[] = [
   { id: 'all', label: 'Все время' },
 ]
 
-const REPORT_CLIENT_TYPE_OPTIONS = ['all', 'Розница', 'Оптовик', 'Кафе', 'Магазин'] as const
+const REPORT_CLIENT_TYPE_OPTIONS = ['all', 'Розница', 'Оптовик'] as const
 const REPORT_RECEIVING_TYPE_OPTIONS = ['all', 'Доставка', 'Самовывоз'] as const
 const REPORT_STATUS_OPTIONS: { id: AdminReportStatusMode; label: string }[] = [
   { id: 'all', label: 'Все статусы' },
@@ -770,7 +766,6 @@ function createCheckoutForm(isB2B: boolean): CheckoutForm {
   return {
     name: '',
     phone: '',
-    customerType: isB2B ? 'wholesale' : 'retail',
     orderType: isB2B ? 'wholesale' : 'retail',
     fulfillment: '',
     address: '',
@@ -1291,6 +1286,17 @@ function normalizeAdminStatus(value: unknown): AdminOrderStatus {
     : 'new'
 }
 
+function normalizeClientTypeLabel(value: unknown): string {
+  const rawValue = String(value ?? '').trim()
+  const normalizedValue = rawValue.toLowerCase()
+
+  if (normalizedValue === 'retail' || normalizedValue === CUSTOMER_TYPE_LABELS.retail.toLowerCase()) {
+    return CUSTOMER_TYPE_LABELS.retail
+  }
+
+  return CUSTOMER_TYPE_LABELS.wholesale
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
@@ -1639,7 +1645,7 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
     'Заказ:',
     `Клиент: ${order.customer_name || '-'}`,
     `Телефон: ${formatPhoneForDisplay(normalizePhone(order.customer_phone))}`,
-    `Тип клиента: ${order.client_type || '-'}`,
+    `Тип клиента: ${normalizeClientTypeLabel(order.client_type)}`,
     `Тип заказа: ${order.order_type || '-'}`,
     `Получение: ${order.receiving_type || '-'}`,
     `Адрес: ${order.delivery_address ?? ''}`,
@@ -1729,7 +1735,7 @@ function AdminClientsPanel({
           id: String(client.id),
           name: String(client.name ?? ''),
           phone: String(client.phone ?? ''),
-          client_type: String(client.client_type ?? ''),
+          client_type: normalizeClientTypeLabel(client.client_type),
           client_status: normalizeClientManualStatus(client.client_status),
           client_note: typeof client.client_note === 'string' ? client.client_note : null,
           created_at: typeof client.created_at === 'string' ? client.created_at : null,
@@ -1969,7 +1975,7 @@ function AdminClientsPanel({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {client.client_type || 'Клиент'}
+                      {normalizeClientTypeLabel(client.client_type)}
                     </p>
                     <h2 className="mt-1 text-lg font-bold text-slate-900">
                       {client.name || 'Без имени'}
@@ -3576,7 +3582,7 @@ function AdminPage() {
       cancelledAmount: 0,
     },
   )
-  const reportFilteredOrders = useMemo(() => {
+  const reportOrders = useMemo(() => {
     const { fromTime, toTime } = getAdminPeriodRange(reportPeriod, reportDateFrom, reportDateTo)
 
     return orders.filter((order) => {
@@ -3590,7 +3596,7 @@ function AdminPage() {
       if (fromTime !== null && orderTime < fromTime) return false
       if (toTime !== null && orderTime > toTime) return false
 
-      if (reportClientType !== 'all' && order.client_type !== reportClientType) return false
+      if (reportClientType !== 'all' && normalizeClientTypeLabel(order.client_type) !== reportClientType) return false
       if (reportReceivingType !== 'all' && order.receiving_type !== reportReceivingType) return false
       if (reportStatusMode === 'active') {
         return order.status === 'new' || order.status === 'processing'
@@ -3614,7 +3620,7 @@ function AdminPage() {
     reportClientType === 'all' ? 'Все клиенты' : reportClientType,
     reportReceivingType === 'all' ? 'Все способы' : reportReceivingType,
     getReportStatusLabel(reportStatusMode),
-    `${reportFilteredOrders.length} заказов`,
+    `${reportOrders.length} заказов`,
   ].join(' · ')
   const orderAnalytics = useMemo(() => {
     const productTotals = new Map<string, { productName: string; totalQuantityKg: number; totalAmount: number }>()
@@ -3622,7 +3628,7 @@ function AdminPage() {
     const orderTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
     const receivingTypeTotals = new Map<string, { label: string; count: number; totalAmount: number }>()
 
-    const totals = reportFilteredOrders.reduce(
+    const totals = reportOrders.reduce(
       (acc, order) => {
         acc.totalTurnover += order.total_amount
         acc.totalWeightKg += order.total_weight_kg
@@ -3643,7 +3649,7 @@ function AdminPage() {
           acc.cancelledWeightKg += order.total_weight_kg
         }
 
-        const clientLabel = order.client_type || 'Не указан'
+        const clientLabel = normalizeClientTypeLabel(order.client_type)
         const currentClient = clientTypeTotals.get(clientLabel) ?? {
           label: clientLabel,
           count: 0,
@@ -3720,13 +3726,13 @@ function AdminPage() {
       orderTypes: Array.from(orderTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
       receivingTypes: Array.from(receivingTypeTotals.values()).sort((a, b) => b.totalAmount - a.totalAmount),
     }
-  }, [reportFilteredOrders])
+  }, [reportOrders])
   const quickCalcTotal = toNumber(quickCalcPrice) * toNumber(quickCalcQuantity)
 
   const buildReportCopyText = () => {
     const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
 
-    if (reportFilteredOrders.length === 0) {
+    if (reportOrders.length === 0) {
       return ['URALSK VEG OPI', `Отчёт: ${periodLabel}`, 'Заказов нет.'].join('\n')
     }
 
@@ -3737,6 +3743,9 @@ function AdminPage() {
     const receivingLines = orderAnalytics.receivingTypes.map(
       (item) => `${item.label} - ${item.count} заказов / ${formatCurrency(item.totalAmount)}`,
     )
+    const clientTypeLines = orderAnalytics.clientTypes.map(
+      (item) => `${item.label} - ${item.count} заказов / ${formatCurrency(item.totalAmount)}`,
+    )
     const orderTypeLines = orderAnalytics.orderTypes.map(
       (item) => `${item.label} - ${item.count} заказов / ${formatCurrency(item.totalAmount)}`,
     )
@@ -3745,7 +3754,7 @@ function AdminPage() {
       'URALSK VEG OPI',
       `Отчёт: ${periodLabel}`,
       '',
-      `Заказов: ${reportFilteredOrders.length}`,
+      `Заказов: ${reportOrders.length}`,
       `Выручка: ${formatCurrency(orderAnalytics.completedRevenue)}`,
       `Ожидаемая сумма: ${formatCurrency(orderAnalytics.expectedAmount)}`,
       `Отменено: ${formatCurrency(orderAnalytics.cancelledAmount)}`,
@@ -3759,6 +3768,9 @@ function AdminPage() {
       '',
       'Топ товаров:',
       ...(productLines.length > 0 ? productLines : ['Нет данных']),
+      '',
+      'Типы клиентов:',
+      ...(clientTypeLines.length > 0 ? clientTypeLines : ['Нет данных']),
       '',
       'Получение:',
       ...(receivingLines.length > 0 ? receivingLines : ['Нет данных']),
@@ -3867,10 +3879,10 @@ function AdminPage() {
           ['Средний чек', formatExcelMoney(orderAnalytics.averageCheck)],
           [],
           ['Заказы', ''],
-          ['Количество заказов', reportFilteredOrders.length],
-          ['Выполнено', reportFilteredOrders.filter((order) => order.status === 'completed').length],
-          ['Новые / В работе', reportFilteredOrders.filter((order) => order.status === 'new' || order.status === 'processing').length],
-          ['Отменено', reportFilteredOrders.filter((order) => order.status === 'cancelled').length],
+          ['Количество заказов', reportOrders.length],
+          ['Выполнено', reportOrders.filter((order) => order.status === 'completed').length],
+          ['Новые / В работе', reportOrders.filter((order) => order.status === 'new' || order.status === 'processing').length],
+          ['Отменено', reportOrders.filter((order) => order.status === 'cancelled').length],
           [],
           ['Вес', ''],
           ['Всего кг', formatExcelKg(orderAnalytics.totalWeightKg)],
@@ -3918,7 +3930,7 @@ function AdminPage() {
         id: String(client.id ?? ''),
         name: String(client.name ?? ''),
         phone: String(client.phone ?? ''),
-        client_type: String(client.client_type ?? ''),
+        client_type: normalizeClientTypeLabel(client.client_type),
         client_status: normalizeClientManualStatus(client.client_status),
         client_note: typeof client.client_note === 'string' ? client.client_note : null,
       }))
@@ -3932,7 +3944,7 @@ function AdminPage() {
       const workbook = XLSX.utils.book_new()
       createSummarySheet(workbook)
 
-      const orderRows: ExcelRow[] = reportFilteredOrders.map((order) => ({
+      const orderRows: ExcelRow[] = reportOrders.map((order) => ({
         'Дата заказа': formatExcelDate(order.created_at),
         'Номер/ID заказа': order.id,
         'Имя клиента': order.customer_name || '',
@@ -3946,11 +3958,11 @@ function AdminPage() {
         'Комментарий клиента': order.comment ?? '',
         'Заметка работника': order.staff_note ?? '',
       }))
-      const ordersTotalAmount = reportFilteredOrders.reduce((sum, order) => sum + order.total_amount, 0)
-      const ordersTotalWeight = reportFilteredOrders.reduce((sum, order) => sum + order.total_weight_kg, 0)
+      const ordersTotalAmount = reportOrders.reduce((sum, order) => sum + order.total_amount, 0)
+      const ordersTotalWeight = reportOrders.reduce((sum, order) => sum + order.total_weight_kg, 0)
       orderRows.push({
         'Дата заказа': 'Итого заказов',
-        'Номер/ID заказа': reportFilteredOrders.length,
+        'Номер/ID заказа': reportOrders.length,
         Сумма: formatExcelMoney(ordersTotalAmount),
         'Общий вес': formatExcelKg(ordersTotalWeight),
       })
@@ -3986,7 +3998,7 @@ function AdminPage() {
           { key: 'cancelled' as AdminOrderStatus, label: ADMIN_STATUS_LABELS.cancelled },
         ] as const
       ).map((statusItem) => {
-        const statusOrders = reportFilteredOrders.filter((order) => order.status === statusItem.key)
+        const statusOrders = reportOrders.filter((order) => order.status === statusItem.key)
         const statusAmount = statusOrders.reduce((sum, order) => sum + order.total_amount, 0)
         const statusWeight = statusOrders.reduce((sum, order) => sum + order.total_weight_kg, 0)
         return {
@@ -4011,7 +4023,7 @@ function AdminPage() {
           totalAmount: number
         }
       >()
-      reportFilteredOrders.forEach((order) => {
+      reportOrders.forEach((order) => {
         order.items.forEach((item) => {
           const productName = item.product_name || 'Товар'
           const current = productTotals.get(productName) ?? {
@@ -4092,6 +4104,38 @@ function AdminPage() {
         ],
       })
 
+      const clientTypeRows: ExcelRow[] = orderAnalytics.clientTypes.map((item) => ({
+        'Тип клиента': item.label,
+        'Количество заказов': item.count,
+        'Общая сумма': formatExcelMoney(item.totalAmount),
+        'Средний чек': item.count > 0 ? formatExcelMoney(item.totalAmount / item.count) : formatExcelMoney(0),
+        'Доля от оборота': formatExcelPercent(
+          orderAnalytics.totalTurnover > 0
+            ? (item.totalAmount / orderAnalytics.totalTurnover) * 100
+            : 0,
+        ),
+      }))
+      addSheet(workbook, 'Типы клиентов', clientTypeRows, {
+        autoFilter: true,
+        headers: ['Тип клиента', 'Количество заказов', 'Общая сумма', 'Средний чек', 'Доля от оборота'],
+      })
+
+      const receivingRows: ExcelRow[] = orderAnalytics.receivingTypes.map((item) => ({
+        Получение: item.label,
+        'Количество заказов': item.count,
+        'Общая сумма': formatExcelMoney(item.totalAmount),
+        'Средний чек': item.count > 0 ? formatExcelMoney(item.totalAmount / item.count) : formatExcelMoney(0),
+        'Доля от оборота': formatExcelPercent(
+          orderAnalytics.totalTurnover > 0
+            ? (item.totalAmount / orderAnalytics.totalTurnover) * 100
+            : 0,
+        ),
+      }))
+      addSheet(workbook, 'Получение', receivingRows, {
+        autoFilter: true,
+        headers: ['Получение', 'Количество заказов', 'Общая сумма', 'Средний чек', 'Доля от оборота'],
+      })
+
       const clientTotals = new Map<
         string,
         {
@@ -4105,7 +4149,7 @@ function AdminPage() {
           lastOrderAt: string | null
         }
       >()
-      reportFilteredOrders.forEach((order) => {
+      reportOrders.forEach((order) => {
         const normalizedPhone = normalizePhone(order.customer_phone)
         const linkedClient =
           (order.client_id ? clientsById.get(order.client_id) : undefined) ??
@@ -4114,7 +4158,7 @@ function AdminPage() {
         const current = clientTotals.get(key) ?? {
           name: linkedClient?.name || order.customer_name || '',
           phone: linkedClient?.phone || order.customer_phone || '',
-          clientType: linkedClient?.client_type || order.client_type || '',
+          clientType: normalizeClientTypeLabel(linkedClient?.client_type || order.client_type),
           clientStatus: normalizeClientManualStatus(linkedClient?.client_status),
           clientNote: linkedClient?.client_note ?? null,
           orderCount: 0,
@@ -4164,8 +4208,8 @@ function AdminPage() {
           Array.from(clientTotals.values()).reduce((sum, client) => sum + client.totalAmount, 0),
         ),
         'Средний чек': formatExcelMoney(
-          reportFilteredOrders.length > 0
-            ? reportFilteredOrders.reduce((sum, order) => sum + order.total_amount, 0) / reportFilteredOrders.length
+          reportOrders.length > 0
+            ? reportOrders.reduce((sum, order) => sum + order.total_amount, 0) / reportOrders.length
             : 0,
         ),
       })
@@ -5197,7 +5241,7 @@ function AdminPage() {
               </div>
               <div className="flex flex-col gap-2 sm:items-end">
                 <p className="text-sm font-bold text-brand-700">
-                  {reportFilteredOrders.length} заказов
+                  {reportOrders.length} заказов
                 </p>
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                   <button
@@ -5559,7 +5603,7 @@ function AdminPage() {
                       <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         Тип клиента
                       </dt>
-                      <dd className="font-semibold text-slate-800">{order.client_type || '—'}</dd>
+                      <dd className="font-semibold text-slate-800">{normalizeClientTypeLabel(order.client_type)}</dd>
                     </div>
                     <div>
                       <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -5770,7 +5814,6 @@ export default function App() {
     setCheckoutForm((prev) => ({
       ...prev,
       orderType: isB2B ? 'wholesale' : 'retail',
-      customerType: isB2B ? 'wholesale' : 'retail',
     }))
   }, [isB2B])
   const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({})
@@ -6689,7 +6732,7 @@ export default function App() {
     const nextCart: Cart = {}
     const targetIsB2B =
       order.order_type === ORDER_TYPE_LABELS.wholesale ||
-      order.client_type === CUSTOMER_TYPE_LABELS.wholesale
+      normalizeClientTypeLabel(order.client_type) === CUSTOMER_TYPE_LABELS.wholesale
 
     order.items.forEach((item) => {
       if (item.product_id === null) return
