@@ -200,6 +200,7 @@ const LOCAL_STORAGE_HISTORY = 'order_history'
 const RETAIL_MARKUP = 90
 const RETAIL_MIN_ORDER_KG = 1
 const WHOLESALE_MIN_ORDER_KG = 25
+const QUANTITY_INPUT_MAX_LENGTH = 7
 
 const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
   retail: 'Розница',
@@ -483,6 +484,17 @@ function getAvailableStockKg(product: Product): number {
   return Math.max(0, product.stock_amount ?? product.retailStockKg ?? 0)
 }
 
+function getMaxOrderQuantityKg(product: Product): number | null {
+  const stock = product.stock_amount ?? product.retailStockKg
+  if (typeof stock !== 'number' || !Number.isFinite(stock) || stock <= 0) return null
+  return stock
+}
+
+function getStockLimitError(product: Product): string {
+  const maxQuantity = getMaxOrderQuantityKg(product) ?? getAvailableStockKg(product)
+  return `На складе доступно только ${formatMoney(maxQuantity)} кг`
+}
+
 function formatStockAmount(value: number): string {
   if (value >= 1000) {
     const tons = value / 1000
@@ -558,7 +570,9 @@ function getProductDisplayConfig(product: Product, isB2B: boolean) {
 function snapVolume(value: number, product: Product, isB2B = true): number {
   const { sliderMin, sliderMax, sliderStep } = getProductDisplayConfig(product, isB2B)
   if (sliderMax < sliderMin) return 0
-  const clamped = Math.min(sliderMax, Math.max(sliderMin, value))
+  const maxQuantity = getMaxOrderQuantityKg(product)
+  const upperLimit = maxQuantity ?? sliderMax
+  const clamped = Math.min(upperLimit, Math.max(sliderMin, value))
   const stepped =
     sliderMin + Math.round((clamped - sliderMin) / sliderStep) * sliderStep
   const decimals = sliderStep % 1 !== 0 ? 1 : 0
@@ -566,7 +580,7 @@ function snapVolume(value: number, product: Product, isB2B = true): number {
 }
 
 function sanitizeQuantityInput(value: string): ProductVolume {
-  const digits = value.replace(/\D/g, '')
+  const digits = value.replace(/\D/g, '').slice(0, QUANTITY_INPUT_MAX_LENGTH)
   if (!digits) return ''
   return Number(digits)
 }
@@ -576,7 +590,8 @@ function getSafeProductVolume(value: ProductVolume, product: Product, isB2B: boo
     return getProductDisplayConfig(product, isB2B).defaultVolume
   }
 
-  return value
+  const maxQuantity = getMaxOrderQuantityKg(product)
+  return maxQuantity ? Math.min(value, maxQuantity) : value
 }
 
 function formatVolumeLabel(_product: Product, volume: number, _isB2B = true): string {
@@ -953,10 +968,14 @@ function formatOrderVolume(_product: Product, volume: number, _isB2B = true): st
 }
 
 function calcPricing(product: Product, volume: number, isB2B = true) {
-  const weightKg = getWeightKg(product, volume, isB2B)
+  const minQuantity = getMinimumOrderKg(isB2B)
+  const maxQuantity = getMaxOrderQuantityKg(product)
+  const safeVolume = Number.isFinite(volume) && volume > 0 ? volume : minQuantity
+  const normalizedVolume = maxQuantity ? Math.min(safeVolume, maxQuantity) : safeVolume
+  const weightKg = getWeightKg(product, normalizedVolume, isB2B)
   const { sliderMin, sliderMax } = getProductDisplayConfig(product, isB2B)
   const discount = isB2B
-    ? getDiscountPercent(volume, sliderMin, sliderMax)
+    ? getDiscountPercent(normalizedVolume, sliderMin, sliderMax)
     : 0
   const wholesalePrice = product.wholesale_price ?? product.basePrice
   const retailPrice = product.retail_price ?? product.basePrice + RETAIL_MARKUP
@@ -6019,6 +6038,11 @@ export default function App() {
     sortBy !== 'default'
 
   const setProductVolume = (product: Product, raw: number) => {
+    const maxQuantity = getMaxOrderQuantityKg(product)
+    if (maxQuantity && raw > maxQuantity) {
+      setCartError(getStockLimitError(product))
+    }
+
     setVolumes((prev) => ({
       ...prev,
       [product.id]: snapVolume(raw, product, isB2B),
@@ -6036,8 +6060,12 @@ export default function App() {
   const normalizeProductVolumeInput = (product: Product) => {
     const current = volumes[product.id]
     const minOrder = getMinimumOrderKg(isB2B)
+    const maxQuantity = getMaxOrderQuantityKg(product)
     if (isB2B && current !== '' && Number.isFinite(current) && current > 0 && current < minOrder) {
       setCartError('Минимальный оптовый заказ — 25 кг')
+    }
+    if (maxQuantity && current !== '' && Number.isFinite(current) && current > maxQuantity) {
+      setCartError(getStockLimitError(product))
     }
 
     setVolumes((prev) => {
@@ -6047,6 +6075,22 @@ export default function App() {
         [product.id]: snapVolume(getSafeProductVolume(current, product, isB2B), product, isB2B),
       }
     })
+  }
+
+  const decreaseProductVolume = (product: Product, currentVolume: number, step: number) => {
+    setProductVolume(product, currentVolume - step)
+  }
+
+  const increaseProductVolume = (product: Product, rawVolume: ProductVolume, currentVolume: number, step: number) => {
+    const maxQuantity = getMaxOrderQuantityKg(product)
+
+    if (maxQuantity && rawVolume !== '' && currentVolume >= maxQuantity) {
+      setCartError(getStockLimitError(product))
+      setProductVolume(product, maxQuantity)
+      return
+    }
+
+    setProductVolume(product, rawVolume === '' ? getMinimumOrderKg(isB2B) : currentVolume + step)
   }
 
   const addToCart = (product: Product) => {
@@ -6068,6 +6112,12 @@ export default function App() {
       return
     }
 
+    const maxQuantity = getMaxOrderQuantityKg(product)
+    if (maxQuantity && selected > maxQuantity) {
+      setCartError(getStockLimitError(product))
+      return
+    }
+
     if (selected < minOrder && isB2B) {
       setCartError('Минимальный оптовый заказ — 25 кг')
       return
@@ -6083,6 +6133,11 @@ export default function App() {
       const current = prev[product.id] ?? 0
       if (current >= stock) {
         setCartError(`В корзине уже выбран весь доступный остаток: ${formatStockAmount(stock)}.`)
+        return prev
+      }
+
+      if (maxQuantity && current + selected > maxQuantity) {
+        setCartError(getStockLimitError(product))
         return prev
       }
 
@@ -6978,7 +7033,6 @@ export default function App() {
               const cfg = getProductDisplayConfig(product, isB2B)
               const step = isB2B ? 25 : 1
               const canDecrease = volume > cfg.sliderMin
-              const canIncrease = rawVolume === '' ? !cannotOrderProduct : volume < cfg.sliderMax
 
               return (
                 <article
@@ -7054,32 +7108,33 @@ export default function App() {
                       <div className="inline-flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-1">
                         <button
                           type="button"
-                          onClick={() => setProductVolume(product, snapVolume(volume - step, product, isB2B))}
+                          onClick={() => decreaseProductVolume(product, volume, step)}
                           disabled={!canDecrease}
                           className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Уменьшить количество ${product.name}`}
                         >
                           <Minus className="h-4 w-4" aria-hidden />
                         </button>
-                        <div className="flex min-w-[5.5rem] items-center justify-center gap-1 px-1 text-sm font-bold text-slate-900">
+                        <div className="flex min-w-[7rem] items-center justify-center gap-1 px-1 text-sm font-bold text-slate-900">
                           <input
                             type="text"
                             inputMode="numeric"
                             pattern="[0-9]*"
+                            maxLength={QUANTITY_INPUT_MAX_LENGTH}
                             value={rawVolume === '' ? '' : String(rawVolume)}
                             onFocus={(event) => event.currentTarget.select()}
                             onChange={(event) => setProductVolumeInput(product, event.target.value)}
                             onBlur={() => normalizeProductVolumeInput(product)}
                             disabled={cannotOrderProduct}
-                            className="h-8 w-14 rounded-lg border border-slate-200 bg-slate-50 text-center text-sm font-bold text-slate-900 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                            className="h-8 w-20 max-w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-center text-sm font-bold text-slate-900 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:text-slate-300"
                             aria-label={`Количество ${product.name} в кг`}
                           />
                           <span>кг</span>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setProductVolume(product, rawVolume === '' ? cfg.sliderMin : snapVolume(volume + step, product, isB2B))}
-                          disabled={!canIncrease}
+                          onClick={() => increaseProductVolume(product, rawVolume, volume, step)}
+                          disabled={cannotOrderProduct}
                           className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Увеличить количество ${product.name}`}
                         >
@@ -7156,25 +7211,26 @@ export default function App() {
                       <div className="flex items-center justify-between gap-3">
                         <button
                           type="button"
-                          onClick={() => setProductVolume(product, snapVolume(volume - step, product, isB2B))}
+                          onClick={() => decreaseProductVolume(product, volume, step)}
                           disabled={!canDecrease}
                           className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Уменьшить количество ${product.name}`}
                         >
                           <Minus className="h-4 w-4" aria-hidden />
                         </button>
-                        <div className="min-w-[6.5rem] text-center">
+                        <div className="min-w-[7.5rem] text-center">
                           <div className="flex items-center justify-center gap-1">
                             <input
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
+                              maxLength={QUANTITY_INPUT_MAX_LENGTH}
                               value={rawVolume === '' ? '' : String(rawVolume)}
                               onFocus={(event) => event.currentTarget.select()}
                               onChange={(event) => setProductVolumeInput(product, event.target.value)}
                               onBlur={() => normalizeProductVolumeInput(product)}
                               disabled={cannotOrderProduct}
-                              className="h-9 w-16 rounded-xl border border-slate-200 bg-white text-center text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                              className="h-9 w-20 max-w-20 overflow-hidden rounded-xl border border-slate-200 bg-white text-center text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:text-slate-300"
                               aria-label={`Количество ${product.name} в кг`}
                             />
                             <span className="text-sm font-semibold text-slate-900">кг</span>
@@ -7183,8 +7239,8 @@ export default function App() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setProductVolume(product, rawVolume === '' ? cfg.sliderMin : snapVolume(volume + step, product, isB2B))}
-                          disabled={!canIncrease}
+                          onClick={() => increaseProductVolume(product, rawVolume, volume, step)}
+                          disabled={cannotOrderProduct}
                           className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
                           aria-label={`Увеличить количество ${product.name}`}
                         >
