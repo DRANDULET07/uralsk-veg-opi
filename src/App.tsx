@@ -1626,7 +1626,13 @@ function buildAdminOrderCopyText(order: AdminOrder): string {
   ].join('\n')
 }
 
-function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: boolean }) {
+function AdminClientsPanel({
+  canDeleteClients = false,
+  canEditClientNotes = false,
+}: {
+  canDeleteClients?: boolean
+  canEditClientNotes?: boolean
+}) {
   const [clients, setClients] = useState<AdminClient[]>([])
   const [clientStats, setClientStats] = useState<Record<string, AdminClientStats>>({})
   const [loading, setLoading] = useState(false)
@@ -1741,6 +1747,11 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
   }, [clients, search])
 
   const startEditClientNote = (client: AdminClient) => {
+    if (!canEditClientNotes) {
+      setError('Нет доступа к редактированию заметки клиента.')
+      return
+    }
+
     setEditingClientNoteId(client.id)
     setClientNoteDraft(client.client_note ?? '')
     setError(null)
@@ -1752,6 +1763,11 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
   }
 
   const saveClientNote = async (clientId: string) => {
+    if (!canEditClientNotes) {
+      setError('Нет доступа к редактированию заметки клиента.')
+      return
+    }
+
     setSavingClientNoteId(clientId)
     setError(null)
 
@@ -1784,18 +1800,6 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
       return
     }
 
-    const stats = clientStats[client.id] ?? {
-      orderCount: 0,
-      totalAmount: 0,
-      averageAmount: 0,
-      lastOrderAt: null,
-    }
-
-    if (stats.orderCount > 0) {
-      setError('Нельзя удалить клиента с заказами.')
-      return
-    }
-
     const confirmed = window.confirm('Удалить клиента? Это действие нельзя отменить.')
     if (!confirmed) return
 
@@ -1803,12 +1807,15 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
     setError(null)
 
     try {
-      const { error: deleteError } = await supabase
+      const { data: deletedClient, error: deleteError } = await supabase
         .from('clients')
         .delete()
         .eq('id', client.id)
+        .select('id')
+        .maybeSingle()
 
       if (deleteError) throw deleteError
+      if (!deletedClient?.id) throw new Error('Client was not deleted')
 
       setClients((prev) => prev.filter((item) => item.id !== client.id))
       setClientStats((prev) => {
@@ -1817,7 +1824,8 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
         return next
       })
     } catch (deleteError) {
-      setError(`Не удалось удалить клиента: ${getErrorMessage(deleteError)}`)
+      console.error('Failed to delete client:', deleteError)
+      setError('Не удалось удалить клиента')
     } finally {
       setDeletingClientId(null)
     }
@@ -1884,7 +1892,7 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
             const status = getAdminClientStatus(stats)
             const normalizedPhone = normalizePhone(client.phone)
             const whatsappText = encodeURIComponent('Здравствуйте! Это URALSK VEG OPI по вашему заказу.')
-            const canDeleteClient = stats.orderCount === 0
+            const hasNoOrders = stats.orderCount === 0
 
             return (
               <article key={client.id} className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70">
@@ -1909,7 +1917,7 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
                     <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${status.className}`}>
                       {status.label}
                     </span>
-                    {canDeleteClient && (
+                    {hasNoOrders && (
                       <span className="w-fit rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
                         Нет заказов
                       </span>
@@ -1941,7 +1949,7 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-sm font-bold text-slate-800">Заметка работника</h3>
-                    {editingClientNoteId !== client.id && (
+                    {canEditClientNotes && editingClientNoteId !== client.id && (
                       <button
                         type="button"
                         onClick={() => startEditClientNote(client)}
@@ -2001,7 +2009,7 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
                 >
                   WhatsApp
                 </a>
-                {canDeleteClients && canDeleteClient ? (
+                {canDeleteClients ? (
                   <button
                     type="button"
                     onClick={() => void deleteClient(client)}
@@ -2010,10 +2018,6 @@ function AdminClientsPanel({ canDeleteClients = false }: { canDeleteClients?: bo
                   >
                     {deletingClientId === client.id ? 'Удаляем...' : 'Удалить клиента'}
                   </button>
-                ) : canDeleteClients ? (
-                  <p className="mt-2 text-xs font-medium text-slate-500">
-                    Нельзя удалить клиента с заказами.
-                  </p>
                 ) : null}
               </article>
             )
@@ -5606,7 +5610,7 @@ function AdminPage() {
         ) : activeAdminTab === 'products' ? (
           <AdminProductsPanel canManageProducts={isOwner} />
         ) : (
-          <AdminClientsPanel canDeleteClients={isOwner} />
+          <AdminClientsPanel canDeleteClients={isOwner} canEditClientNotes={isOwner} />
         )}
       </div>
     </div>

@@ -241,7 +241,73 @@ create policy owner_delete_products
   );
 
 -- ============================================================
--- 5. NOTES
+-- 5. CLIENTS POLICIES
+-- ============================================================
+-- Admins need to read clients in the "Clients" tab.
+-- Only the owner can update client notes or delete client records.
+-- Deleting a client must not delete related orders.
+
+alter table public.clients
+  enable row level security;
+
+drop policy if exists "admin_read_clients"
+  on public.clients;
+
+create policy "admin_read_clients"
+  on public.clients
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
+
+drop policy if exists "owner_update_clients"
+  on public.clients;
+
+create policy "owner_update_clients"
+  on public.clients
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+drop policy if exists "owner_delete_clients"
+  on public.clients;
+
+create policy "owner_delete_clients"
+  on public.clients
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+-- ============================================================
+-- 6. NOTES
 -- ============================================================
 -- If the admin panel can read products but cannot save changes,
 -- check owner_update_products first.
