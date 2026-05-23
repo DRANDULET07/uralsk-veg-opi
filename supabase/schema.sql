@@ -1,199 +1,251 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- Supabase schema and RLS reference for uralsk-veg-opi.
+-- This file is documentation and a backup setup guide.
+-- Do not run it blindly on production: review each section first.
 
-CREATE TABLE IF NOT EXISTS public.products (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
+create extension if not exists pgcrypto;
+
+-- ============================================================
+-- 1. ADMIN PROFILES / ROLES
+-- ============================================================
+-- admin_profiles is needed for owner/worker roles.
+-- The app checks this table after Supabase auth login.
+
+create table if not exists public.admin_profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  role text not null check (role in ('owner', 'worker')),
+  created_at timestamptz default now()
+);
+
+alter table public.admin_profiles
+  enable row level security;
+
+drop policy if exists admin_read_own_profile
+  on public.admin_profiles;
+
+create policy admin_read_own_profile
+  on public.admin_profiles
+  for select
+  to authenticated
+  using (auth.uid() = id);
+
+-- ============================================================
+-- 2. ROLE CREATION CHEATSHEET
+-- ============================================================
+-- Run these manually in Supabase SQL editor after the user signs up.
+-- Keep them commented here so this file can be pasted safely.
+
+-- Add owner:
+-- insert into admin_profiles (id, email, role)
+-- select id, email, 'owner'
+-- from auth.users
+-- where email = 'email@gmail.com';
+
+-- Add worker:
+-- insert into admin_profiles (id, email, role)
+-- select id, email, 'worker'
+-- from auth.users
+-- where email = 'email@gmail.com';
+
+-- Check roles:
+-- select * from admin_profiles;
+
+-- Change role:
+-- update admin_profiles
+-- set role = 'owner'
+-- where email = 'email@gmail.com';
+
+-- Remove access:
+-- delete from admin_profiles
+-- where email = 'email@gmail.com';
+
+-- ============================================================
+-- 3. PRODUCT IMAGES STORAGE POLICIES
+-- ============================================================
+-- Bucket: product-images
+-- Storage policies are needed so clients can view product photos
+-- and the owner can upload, replace and delete product images.
+
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do nothing;
+
+drop policy if exists product_images_public_select
+  on storage.objects;
+
+create policy product_images_public_select
+  on storage.objects
+  for select
+  to anon, authenticated
+  using (bucket_id = 'product-images');
+
+drop policy if exists product_images_owner_insert
+  on storage.objects;
+
+create policy product_images_owner_insert
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'product-images'
+    and exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+drop policy if exists product_images_owner_update
+  on storage.objects;
+
+create policy product_images_owner_update
+  on storage.objects
+  for update
+  to authenticated
+  using (
+    bucket_id = 'product-images'
+    and exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  )
+  with check (
+    bucket_id = 'product-images'
+    and exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+drop policy if exists product_images_owner_delete
+  on storage.objects;
+
+create policy product_images_owner_delete
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'product-images'
+    and exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+-- ============================================================
+-- 4. PRODUCTS POLICIES
+-- ============================================================
+-- Main catalog table used by the public site and admin panel.
+-- public_read_products is needed so clients can see products.
+-- owner_update_products is needed so the owner can change prices,
+-- stock_amount, status, image_url and other product fields.
+
+create table if not exists public.products (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  variant text,
   category text,
   image text,
-  wholesale_price numeric NOT NULL,
-  retail_price numeric NOT NULL,
-  unit text DEFAULT 'кг',
-  min_order numeric DEFAULT 1,
+  image_url text,
+  wholesale_price numeric not null,
+  retail_price numeric not null,
+  unit text default 'kg',
+  min_order numeric default 1,
   status text,
   freshness text,
   location text,
   description text,
   origin text,
-  in_stock boolean DEFAULT true,
-  stock_amount numeric DEFAULT 0,
-  is_in_transit boolean DEFAULT false,
+  in_stock boolean default true,
+  stock_amount numeric default 0,
+  is_in_transit boolean default false,
   delivery_eta text,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now()
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
-ALTER TABLE public.products
-  ENABLE ROW LEVEL SECURITY;
+alter table public.products
+  enable row level security;
 
-DROP POLICY IF EXISTS "Allow public read access to products"
-  ON public.products;
+drop policy if exists public_read_products
+  on public.products;
 
-CREATE POLICY "Allow public read access to products"
-  ON public.products
-  FOR SELECT
-  USING (true);
+create policy public_read_products
+  on public.products
+  for select
+  to anon, authenticated
+  using (is_active is distinct from false);
 
-ALTER TABLE IF EXISTS public.products
-  ADD COLUMN IF NOT EXISTS variant text,
-  ADD COLUMN IF NOT EXISTS image_url text,
-  ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+drop policy if exists owner_insert_products
+  on public.products;
 
-ALTER TABLE IF EXISTS public.orders
-  ADD COLUMN IF NOT EXISTS archived_at timestamptz;
-
-ALTER TABLE IF EXISTS public.clients
-  ADD COLUMN IF NOT EXISTS client_note text;
-
-CREATE TABLE IF NOT EXISTS public.admin_profiles (
-  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email text NOT NULL,
-  role text NOT NULL CHECK (role IN ('owner', 'worker')),
-  created_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE public.admin_profiles
-  ENABLE ROW LEVEL SECURITY;
-
-CREATE OR REPLACE FUNCTION public.is_admin_owner()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.admin_profiles
-    WHERE id = auth.uid()
-      AND role = 'owner'
+create policy owner_insert_products
+  on public.products
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
   );
-$$;
 
-DROP POLICY IF EXISTS "Admins can read own profile"
-  ON public.admin_profiles;
+drop policy if exists owner_update_products
+  on public.products;
 
-CREATE POLICY "Admins can read own profile"
-  ON public.admin_profiles
-  FOR SELECT
-  USING (auth.uid() = id);
-
-DROP POLICY IF EXISTS "Owners can read all admin profiles"
-  ON public.admin_profiles;
-
-CREATE POLICY "Owners can read all admin profiles"
-  ON public.admin_profiles
-  FOR SELECT
-  USING (public.is_admin_owner());
-
-INSERT INTO public.products (
-  name,
-  category,
-  image,
-  wholesale_price,
-  retail_price,
-  unit,
-  min_order,
-  status,
-  freshness,
-  location,
-  description,
-  origin,
-  in_stock,
-  stock_amount,
-  is_in_transit,
-  delivery_eta
-) VALUES
-  (
-    'Картофель',
-    'Местный, КХ',
-    '/products/potato.jpg',
-    150,
-    240,
-    'т',
-    1,
-    'Свежий привоз',
-    'Цена стабильна',
-    'Склад №1 (Уральск)',
-    'Стабильный объем местного картофеля. Запасы на складе в избытке.',
-    'Уральск',
-    true,
-    42,
-    false,
-    null
-  ),
-
-  (
-    'Лук репчатый',
-    'Оптовая партия',
-    '/products/onion.jpg',
-    110,
-    200,
-    'т',
-    1,
-    'В наличии',
-    'Сезонное снижение цены',
-    'Склад №1 (Уральск)',
-    'Крупная партия репчатого лука высокого качества.',
-    'Казахстан',
-    true,
-    38,
-    false,
-    null
-  ),
-
-  (
-    'Морковь',
-    'Мытая',
-    '/products/carrot.jpg',
-    130,
-    220,
-    'т',
-    1,
-    'В пути',
-    'Ожидается подорожание',
-    'Таможенный пост Маштаково / Самарская трасса',
-    'Доступно бронирование партии в пути.',
-    'Узбекистан',
-    true,
-    25,
-    true,
-    'Ожидается завтра'
-  ),
-
-  (
-    'Томаты',
-    'Тепличные',
-    '/products/tomato.jpg',
-    650,
-    740,
-    'кг',
-    5,
-    'Свежий привоз',
-    'Высокий спрос',
-    'Склад №2 (Охлаждаемый)',
-    'Тепличные томаты пользуются повышенным спросом перед выходными.',
-    'Казахстан',
-    true,
-    50,
-    false,
-    null
-  ),
-
-  (
-    'Капуста',
-    'Белокочанная',
-    '/products/cabbage.jpg',
-    95,
-    185,
-    'т',
-    1,
-    'Свежий привоз',
-    'Цена стабильна',
-    'Склад №1 (Уральск)',
-    'Качество партии отличное, товар готов к длительной транспортировке.',
-    'Казахстан',
-    true,
-    44,
-    false,
-    null
+create policy owner_update_products
+  on public.products
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
   );
+
+drop policy if exists owner_delete_products
+  on public.products;
+
+create policy owner_delete_products
+  on public.products
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+-- ============================================================
+-- 5. NOTES
+-- ============================================================
+-- If the admin panel can read products but cannot save changes,
+-- check owner_update_products first.
+-- If photo upload succeeds but image_url cannot be saved,
+-- check owner_update_products on public.products.
+-- If photo upload fails before saving the product, check
+-- product_images_owner_insert/update/delete on storage.objects.
