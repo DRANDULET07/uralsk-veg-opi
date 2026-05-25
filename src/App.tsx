@@ -1264,7 +1264,7 @@ function QuantitySelector({ product, value, isB2B, onChange }: QuantitySelectorP
 function ProductSkeleton() {
   return (
     <article className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/70">
-      <div className="relative h-48 w-full overflow-hidden bg-slate-200">
+      <div className="relative h-[250px] w-full overflow-hidden bg-slate-200 lg:h-52">
         <div className="absolute inset-0 animate-pulse bg-slate-300" />
       </div>
       <div className="space-y-4 p-5">
@@ -1596,7 +1596,7 @@ function ProductImage({
   src,
   alt,
   className,
-  imgClassName = 'h-full w-full object-cover',
+  imgClassName = 'block h-full w-full object-contain object-center',
   fallbackClassName = 'text-sm font-semibold text-slate-500',
 }: {
   src?: string | null
@@ -2836,7 +2836,7 @@ function AdminProductsPanel({ canManageProducts = true }: { canManageProducts?: 
                 <ProductImage
                   src={productImage}
                   alt={product.name}
-                  className="h-40 bg-slate-100 sm:h-44"
+                  className="h-40 w-full overflow-hidden bg-slate-100 sm:h-44"
                   fallbackClassName="text-sm font-bold text-slate-400"
                 />
                   <div className="p-5">
@@ -6997,14 +6997,14 @@ export default function App() {
                     return (
                       <article
                         key={product.id}
-                        className="flex h-[330px] w-[168px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                        className="flex h-[350px] w-[168px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                       >
-                        <div className="relative h-[120px] w-full overflow-hidden bg-slate-100">
+                        <div className="relative h-[140px] w-full overflow-hidden rounded-t-2xl bg-white p-2">
                           <ProductImage
                             src={productImage}
                             alt={product.name}
-                            className="h-full w-full object-cover"
-                            imgClassName="h-full w-full object-cover"
+                            className="h-full w-full"
+                            imgClassName="block h-full w-full object-contain object-center"
                             fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
                           />
                         </div>
@@ -7195,12 +7195,12 @@ export default function App() {
                   key={product.id}
                   className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md lg:rounded-3xl lg:border-0"
                 >
-                  <div className="relative h-[180px] w-full overflow-hidden bg-slate-100 lg:h-44">
+                  <div className="relative h-[250px] w-full overflow-hidden rounded-t-2xl bg-white p-3 lg:h-52 lg:rounded-t-3xl lg:p-4">
                     <ProductImage
                       src={productImage}
                       alt={product.name}
-                      className="h-full w-full object-cover"
-                      imgClassName="h-full w-full object-cover object-center"
+                      className="h-full w-full"
+                      imgClassName="block h-full w-full object-contain object-center"
                       fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
                     />
                     {inCart && (
@@ -7739,12 +7739,12 @@ export default function App() {
             >
               <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-200 cursor-grab active:cursor-grabbing" aria-hidden />
             </div>
-            <div className="relative h-44 shrink-0 overflow-hidden bg-slate-100">
+            <div className="relative h-56 shrink-0 overflow-hidden bg-white p-4">
               <ProductImage
                 src={detailProduct.image_url || detailProduct.image}
                 alt={detailProduct.name}
-                className="h-full w-full object-cover"
-                imgClassName="h-full w-full object-cover"
+                className="h-full w-full"
+                imgClassName="block h-full w-full object-contain object-center"
                 fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
               />
               <button
