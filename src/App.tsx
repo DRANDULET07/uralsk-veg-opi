@@ -4825,36 +4825,64 @@ function AdminPage() {
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-4 lg:grid-cols-7">
-            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
-              <p className="text-xs text-brand-100">Всего заказов</p>
-              <p className="text-lg font-bold sm:text-xl">{statsOrders.length}</p>
+          {adminRole === 'owner' ? (
+            <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-4 lg:grid-cols-7">
+              <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
+                <p className="text-xs text-brand-100">Всего заказов</p>
+                <p className="text-lg font-bold sm:text-xl">{statsOrders.length}</p>
+              </div>
+              <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
+                <p className="text-xs text-brand-100">Новые</p>
+                <p className="text-lg font-bold sm:text-xl">{statusStats.new}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
+                <p className="text-xs text-brand-100">В работе</p>
+                <p className="text-lg font-bold sm:text-xl">{statusStats.processing}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
+                <p className="text-xs text-brand-100">Выполненные</p>
+                <p className="text-lg font-bold sm:text-xl">{statusStats.completed}</p>
+              </div>
+              <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
+                <p className="text-xs text-brand-100">Выручка</p>
+                <p className="text-base font-bold sm:text-lg">{formatCurrency(statusStats.revenue)}</p>
+              </div>
+              <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
+                <p className="text-xs text-brand-100">Ожидаемая сумма</p>
+                <p className="text-lg font-bold">{formatCurrency(statusStats.expected)}</p>
+              </div>
+              <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
+                <p className="text-xs text-brand-100">Отменено</p>
+                <p className="text-lg font-bold">{formatCurrency(statusStats.cancelledAmount)}</p>
+              </div>
             </div>
-            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
-              <p className="text-xs text-brand-100">Новые</p>
-              <p className="text-lg font-bold sm:text-xl">{statusStats.new}</p>
+          ) : (
+            <div className="mt-3 rounded-2xl border border-white/10 bg-white/10 p-3 lg:mt-4 sm:p-4">
+              <h2 className="text-sm font-bold text-white sm:text-base">Рабочая сводка</h2>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <div className="rounded-2xl bg-white/10 px-3 py-2">
+                  <p className="text-xs text-brand-100">Всего заказов</p>
+                  <p className="text-lg font-bold">{statsOrders.length}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 px-3 py-2">
+                  <p className="text-xs text-brand-100">Новые</p>
+                  <p className="text-lg font-bold">{statusStats.new}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 px-3 py-2">
+                  <p className="text-xs text-brand-100">В работе</p>
+                  <p className="text-lg font-bold">{statusStats.processing}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 px-3 py-2">
+                  <p className="text-xs text-brand-100">Выполненные</p>
+                  <p className="text-lg font-bold">{statusStats.completed}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 px-3 py-2">
+                  <p className="text-xs text-brand-100">Отменённые</p>
+                  <p className="text-lg font-bold">{statusStats.cancelled}</p>
+                </div>
+              </div>
             </div>
-            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
-              <p className="text-xs text-brand-100">В работе</p>
-              <p className="text-lg font-bold sm:text-xl">{statusStats.processing}</p>
-            </div>
-            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
-              <p className="text-xs text-brand-100">Выполненные</p>
-              <p className="text-lg font-bold sm:text-xl">{statusStats.completed}</p>
-            </div>
-            <div className="rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3">
-              <p className="text-xs text-brand-100">Выручка</p>
-              <p className="text-base font-bold sm:text-lg">{formatCurrency(statusStats.revenue)}</p>
-            </div>
-            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
-              <p className="text-xs text-brand-100">Ожидаемая сумма</p>
-              <p className="text-lg font-bold">{formatCurrency(statusStats.expected)}</p>
-            </div>
-            <div className="hidden rounded-2xl bg-white/10 px-3 py-2 sm:px-4 sm:py-3 lg:block">
-              <p className="text-xs text-brand-100">Отменено</p>
-              <p className="text-lg font-bold">{formatCurrency(statusStats.cancelledAmount)}</p>
-            </div>
-          </div>
+          )}
         </header>
 
         {createOrderOpen && (
@@ -5111,6 +5139,7 @@ function AdminPage() {
           </div>
         )}
 
+        {adminRole === 'owner' && (
         <section className="mb-5 grid gap-4 xl:grid-cols-2">
           <div className="rounded-3xl bg-white p-4 shadow-xl shadow-slate-200/70 sm:p-5 xl:col-span-2">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -5251,7 +5280,6 @@ function AdminPage() {
                   >
                     {reportCopied ? 'Отчёт скопирован' : 'Скопировать отчёт'}
                   </button>
-                  {isOwner && (
                   <button
                     type="button"
                     onClick={() => void downloadExcelReport()}
@@ -5260,7 +5288,6 @@ function AdminPage() {
                     <Download className="h-4 w-4" />
                     Скачать отчёт
                   </button>
-                  )}
                 </div>
               </div>
             </div>
@@ -5443,6 +5470,7 @@ function AdminPage() {
             </button>
           </div>
         </section>
+        )}
 
         <div className="mb-3 flex items-center justify-between gap-3 sm:hidden">
           <p className="text-sm font-semibold text-slate-700">Найдено заказов: {filteredOrders.length}</p>
