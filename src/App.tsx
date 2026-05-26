@@ -4295,13 +4295,36 @@ function AdminPage() {
     setOrdersError(null)
 
     try {
-      const { error } = await supabase.from('orders').update({ status }).eq('id', orderId)
-      if (error) throw error
+      const { data: updatedOrder, error } = await supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', orderId)
+        .select('*')
+        .maybeSingle()
+
+      if (error) {
+        console.error('Failed to update order status', error)
+        throw error
+      }
+
+      if (!updatedOrder) {
+        throw new Error('Не удалось сохранить изменения. Возможно, нет прав доступа.')
+      }
 
       setOrders((prev) =>
-        prev.map((order) => (order.id === orderId ? { ...order, status } : order)),
+        prev.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                status: normalizeAdminStatus(updatedOrder.status),
+                archived_at:
+                  typeof updatedOrder.archived_at === 'string' ? updatedOrder.archived_at : null,
+              }
+            : order,
+        ),
       )
     } catch (error) {
+      console.error('Failed to update order status', error)
       setOrdersError(getErrorMessage(error))
     } finally {
       setUpdatingOrderId(null)
@@ -4321,27 +4344,16 @@ function AdminPage() {
       const archivedAt = new Date().toISOString()
       console.log('Archiving order id:', orderId)
 
-      const { error: updateError } = await supabase
+      const { data: updatedOrder, error: updateError } = await supabase
         .from('orders')
         .update({ archived_at: archivedAt })
         .eq('id', orderId)
+        .select('*')
+        .maybeSingle()
 
       if (updateError) {
         console.error('Archive order update error:', updateError)
         setOrdersError(`Не удалось отправить заказ в архив: ${updateError.message}`)
-        return
-      }
-
-      const { data: updatedOrder, error: readError } = await supabase
-        .from('orders')
-        .select('id, archived_at')
-        .eq('id', orderId)
-        .maybeSingle()
-
-      if (readError) {
-        console.error('Archive order read error:', readError)
-        setOrdersError(`Заказ обновлён, но не удалось проверить архив: ${readError.message}`)
-        await loadAdminOrders()
         return
       }
 
@@ -4350,14 +4362,19 @@ function AdminPage() {
           orderId,
           updatedOrder,
         })
-        setOrdersError('Supabase не подтвердил archived_at. Проверь, изменилось ли значение в таблице orders.')
-        await loadAdminOrders()
+        setOrdersError('Не удалось сохранить изменения. Возможно, нет прав доступа.')
         return
       }
 
       setOrders((prev) =>
         prev.map((order) =>
-          order.id === orderId ? { ...order, archived_at: updatedOrder.archived_at } : order,
+          order.id === orderId
+            ? {
+                ...order,
+                status: normalizeAdminStatus(updatedOrder.status),
+                archived_at: updatedOrder.archived_at,
+              }
+            : order,
         ),
       )
     } catch (error) {
@@ -4380,27 +4397,16 @@ function AdminPage() {
     try {
       console.log('Restoring order id:', orderId)
 
-      const { error: updateError } = await supabase
+      const { data: updatedOrder, error: updateError } = await supabase
         .from('orders')
         .update({ archived_at: null })
         .eq('id', orderId)
+        .select('*')
+        .maybeSingle()
 
       if (updateError) {
         console.error('Restore order update error:', updateError)
         setOrdersError(`Не удалось восстановить заказ: ${updateError.message}`)
-        return
-      }
-
-      const { data: updatedOrder, error: readError } = await supabase
-        .from('orders')
-        .select('id, archived_at')
-        .eq('id', orderId)
-        .maybeSingle()
-
-      if (readError) {
-        console.error('Restore order read error:', readError)
-        setOrdersError(`Заказ обновлён, но не удалось проверить восстановление: ${readError.message}`)
-        await loadAdminOrders()
         return
       }
 
@@ -4409,14 +4415,20 @@ function AdminPage() {
           orderId,
           updatedOrder,
         })
-        setOrdersError('Supabase не вернул заказ после восстановления. Проверь id заказа или RLS policy.')
-        await loadAdminOrders()
+        setOrdersError('Не удалось сохранить изменения. Возможно, нет прав доступа.')
         return
       }
 
       setOrders((prev) =>
         prev.map((order) =>
-          order.id === orderId ? { ...order, archived_at: null } : order,
+          order.id === orderId
+            ? {
+                ...order,
+                status: normalizeAdminStatus(updatedOrder.status),
+                archived_at:
+                  typeof updatedOrder.archived_at === 'string' ? updatedOrder.archived_at : null,
+              }
+            : order,
         ),
       )
     } catch (error) {

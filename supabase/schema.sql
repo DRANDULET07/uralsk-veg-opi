@@ -310,11 +310,133 @@ create policy "owner_delete_clients"
   );
 
 -- ============================================================
--- 6. NOTES
+-- 6. ORDERS POLICIES
+-- ============================================================
+-- Admins need to read orders and order_items in the Orders tab.
+-- Workers can update order status and staff notes.
+-- The app UI keeps archive/restore actions owner-only.
+-- Keep public insert policies if clients create orders from the storefront.
+
+alter table public.orders
+  enable row level security;
+
+drop policy if exists "public_insert_orders"
+  on public.orders;
+
+create policy "public_insert_orders"
+  on public.orders
+  for insert
+  to anon, authenticated
+  with check (true);
+
+drop policy if exists "admin_read_orders"
+  on public.orders;
+
+create policy "admin_read_orders"
+  on public.orders
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
+
+drop policy if exists "admin_update_orders"
+  on public.orders;
+
+create policy "admin_update_orders"
+  on public.orders
+  for update
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
+
+drop policy if exists "owner_delete_orders"
+  on public.orders;
+
+create policy "owner_delete_orders"
+  on public.orders
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+alter table public.order_items
+  enable row level security;
+
+drop policy if exists "public_insert_order_items"
+  on public.order_items;
+
+create policy "public_insert_order_items"
+  on public.order_items
+  for insert
+  to anon, authenticated
+  with check (true);
+
+drop policy if exists "admin_read_order_items"
+  on public.order_items;
+
+create policy "admin_read_order_items"
+  on public.order_items
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
+
+drop policy if exists "owner_delete_order_items"
+  on public.order_items;
+
+create policy "owner_delete_order_items"
+  on public.order_items
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role = 'owner'
+    )
+  );
+
+-- ============================================================
+-- 7. NOTES
 -- ============================================================
 -- If the admin panel can read products but cannot save changes,
 -- check owner_update_products first.
 -- If photo upload succeeds but image_url cannot be saved,
 -- check owner_update_products on public.products.
+-- If order status or archive actions reset after page refresh,
+-- check admin_update_orders on public.orders.
 -- If photo upload fails before saving the product, check
 -- product_images_owner_insert/update/delete on storage.objects.
