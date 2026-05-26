@@ -31,7 +31,7 @@ const DELIVERY_ADDRESS_MAX_LENGTH = 150
 const STAFF_NOTE_MAX_LENGTH = 500
 const CLIENT_NOTE_MAX_LENGTH = 500
 
-type TabId = 'all' | 'warehouse' | 'transit'
+type ProductQuickFilter = 'all' | 'available' | 'incoming' | 'low_stock'
 type WarehouseFilterId = 'all' | 'warehouse1' | 'warehouse2'
 type SortOption = 'default' | 'price-asc' | 'price-desc'
 type OrderType = 'retail' | 'wholesale'
@@ -411,10 +411,11 @@ const fallbackProducts: Product[] = [
   },
 ]
 
-const TABS: { id: TabId; label: string }[] = [
+const PRODUCT_QUICK_FILTERS: { id: ProductQuickFilter; label: string }[] = [
   { id: 'all', label: 'Все овощи' },
-  { id: 'warehouse', label: 'В наличии на складе' },
-  { id: 'transit', label: 'Товар в пути' },
+  { id: 'available', label: 'В наличии на складе' },
+  { id: 'incoming', label: 'Товар в пути' },
+  { id: 'low_stock', label: 'Мало остатка' },
 ]
 
 const WAREHOUSE_FILTERS: { id: WarehouseFilterId; label: string }[] = [
@@ -1090,10 +1091,13 @@ function CollapsibleText({
   )
 }
 
-function matchesTab(product: Product, tab: TabId): boolean {
-  if (tab === 'all') return true
-  if (tab === 'warehouse') return product.availability === 'warehouse'
-  return product.availability === 'transit'
+function matchesProductQuickFilter(product: Product, filter: ProductQuickFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'available') return product.availability === 'warehouse' && product.in_stock !== false
+  if (filter === 'incoming') return product.availability === 'transit'
+
+  const stock = getAvailableStockKg(product)
+  return stock > 0 && stock <= 50
 }
 
 function matchesSearch(product: Product, query: string): boolean {
@@ -1111,17 +1115,6 @@ function getProductWarehouseId(product: Product): WarehouseFilterId | 'transit' 
 function matchesWarehouse(product: Product, warehouse: WarehouseFilterId): boolean {
   if (warehouse === 'all') return true
   return getProductWarehouseId(product) === warehouse
-}
-
-function matchesInStockOnly(product: Product, onlyInStock: boolean): boolean {
-  if (!onlyInStock) return true
-  return product.availability === 'warehouse' && product.in_stock !== false
-}
-
-function matchesLowStock(product: Product, onlyLowStock: boolean): boolean {
-  if (!onlyLowStock) return true
-  const stock = getAvailableStockKg(product)
-  return stock > 0 && stock <= 50
 }
 
 function sortProducts(products: Product[], sortBy: SortOption): Product[] {
@@ -5807,11 +5800,9 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsError, setProductsError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<TabId>('all')
+  const [productQuickFilter, setProductQuickFilter] = useState<ProductQuickFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilterId>('all')
-  const [onlyInStock, setOnlyInStock] = useState(false)
-  const [onlyLowStock, setOnlyLowStock] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [isB2B, setIsB2B] = useState(true)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -6198,14 +6189,12 @@ export default function App() {
   const filteredProducts = useMemo(() => {
     const list = products.filter(
       (p) =>
-        matchesTab(p, activeTab) &&
+        matchesProductQuickFilter(p, productQuickFilter) &&
         matchesSearch(p, normalizedSearch) &&
-        matchesWarehouse(p, warehouseFilter) &&
-        matchesInStockOnly(p, onlyInStock) &&
-        matchesLowStock(p, onlyLowStock),
+        matchesWarehouse(p, warehouseFilter),
     )
     return sortProducts(list, sortBy)
-  }, [activeTab, normalizedSearch, warehouseFilter, onlyInStock, onlyLowStock, products, sortBy])
+  }, [productQuickFilter, normalizedSearch, warehouseFilter, products, sortBy])
 
   const cartLines = useMemo(() => getCartLines(cart, products, isB2B), [cart, isB2B, products])
   const cartCount = cartLines.length
@@ -6216,9 +6205,8 @@ export default function App() {
 
   const hasActiveFilters =
     normalizedSearch.length > 0 ||
+    productQuickFilter !== 'all' ||
     warehouseFilter !== 'all' ||
-    onlyInStock ||
-    onlyLowStock ||
     sortBy !== 'default'
 
   const setProductVolume = (product: Product, raw: number) => {
@@ -6941,32 +6929,21 @@ export default function App() {
           </label>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {TABS.map((tab) => (
+            {PRODUCT_QUICK_FILTERS.map((filter) => (
               <button
-                key={tab.id}
+                key={filter.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => setProductQuickFilter(filter.id)}
                 className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  activeTab === tab.id
+                  productQuickFilter === filter.id
                     ? 'bg-emerald-700 text-white shadow-lg shadow-emerald-700/20'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
+                aria-pressed={productQuickFilter === filter.id}
               >
-                {tab.label}
+                {filter.label}{filter.id === 'low_stock' && lowStockCount > 0 ? ` (${lowStockCount})` : ''}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setOnlyLowStock((value) => !value)}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                onlyLowStock
-                  ? 'bg-emerald-700 text-white shadow-lg shadow-emerald-700/20'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-              aria-pressed={onlyLowStock}
-            >
-              Мало остатка{lowStockCount > 0 ? ` (${lowStockCount})` : ''}
-            </button>
           </div>
 
           <div className="mt-4 grid gap-3 rounded-3xl bg-emerald-50/90 p-4 text-sm text-emerald-950 shadow-sm sm:grid-cols-3">
@@ -7082,19 +7059,6 @@ export default function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 md:flex-1">
-              <button
-                type="button"
-                onClick={() => setOnlyInStock((v) => !v)}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition active:scale-[0.98] ${
-                  onlyInStock
-                    ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
-                }`}
-                aria-pressed={onlyInStock}
-              >
-                Только в наличии
-              </button>
-
               <div className="flex min-w-0 flex-1 items-center gap-1.5 md:max-w-xs">
                 <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                 <select
