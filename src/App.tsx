@@ -6804,7 +6804,7 @@ export default function App() {
     )
     const flaggedProducts = availableProducts.filter((product) => product.is_popular)
 
-    return (flaggedProducts.length > 0 ? flaggedProducts : availableProducts).slice(0, 5)
+    return (flaggedProducts.length > 0 ? flaggedProducts : availableProducts).slice(0, 4)
   }, [isB2B, products])
   const detailProduct = analyticsOpenId
     ? products.find((product) => product.id === analyticsOpenId) ?? null
@@ -7008,12 +7008,9 @@ export default function App() {
                   Смотреть все
                 </button>
               </div>
-              <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
-                <div className="flex w-max gap-3 snap-x snap-mandatory touch-pan-x">
-                  {popularProducts.map((product) => {
+              <div className="grid grid-cols-2 gap-3 pb-4">
+                {popularProducts.map((product) => {
                     const productImage = product.image_url || product.image
-                    const stockDisplay = getStockDisplay(product)
-                    const isProductInStock = product.in_stock !== false
                     const pricing = calcPricing(
                       product,
                       getProductDisplayConfig(product, isB2B).defaultVolume,
@@ -7025,9 +7022,9 @@ export default function App() {
                     return (
                       <article
                         key={product.id}
-                        className="flex h-[350px] w-[168px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                        className="flex h-[250px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                       >
-                        <div className="relative h-[140px] w-full overflow-hidden rounded-t-2xl bg-white p-2">
+                        <div className="relative h-[105px] w-full shrink-0 overflow-hidden rounded-t-2xl bg-slate-50 p-1.5">
                           <ProductImage
                             src={productImage}
                             alt={product.name}
@@ -7036,26 +7033,14 @@ export default function App() {
                             fallbackClassName="flex h-full items-center justify-center text-sm font-semibold text-slate-500"
                           />
                         </div>
-                        <div className="space-y-1.5 overflow-hidden p-3">
-                          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                            {product.category ?? product.subtitle}
-                          </p>
-                          <h3 className="line-clamp-2 min-h-9 text-sm font-bold leading-tight text-slate-900">{product.name}</h3>
-                          <div className="flex items-center gap-2">
-                            <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusToneClass[product.statusTone]}`}>
-                              {product.is_in_transit ? 'В пути' : isProductInStock ? 'В наличии' : 'Нет в наличии'}
-                            </span>
-                          </div>
-                          <p className="truncate text-[11px] font-semibold text-slate-500">{stockDisplay.label}</p>
-                          <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                            <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{isB2B ? 'Опт' : 'Розница'}</p>
-                            <p className="mt-1 font-bold text-slate-900">{formatCurrency(pricing.pricePerKg)}/кг</p>
-                          </div>
+                        <div className="flex flex-1 flex-col overflow-hidden p-2">
+                          <h3 className="line-clamp-1 text-base font-bold leading-tight text-slate-900">{product.name}</h3>
+                          <p className="mt-0.5 text-xl font-extrabold leading-tight text-brand-800">{formatCurrency(pricing.pricePerKg)}/кг</p>
                           <button
                             type="button"
                             onClick={() => addToCart(product)}
                             disabled={cannotOrderProduct}
-                            className={`mt-1 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold text-white transition active:scale-[0.98] ${
+                            className={`mt-auto flex h-10 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold text-white transition active:scale-[0.98] ${
                               cannotOrderProduct
                                 ? 'cursor-not-allowed bg-slate-300 text-slate-500'
                                 : justAdded
@@ -7071,8 +7056,7 @@ export default function App() {
                         </div>
                       </article>
                     )
-                  })}
-                </div>
+                })}
               </div>
             </section>
           )}
