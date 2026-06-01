@@ -6488,6 +6488,8 @@ export default function App() {
         : null
     const comment = limitText(checkoutForm.comment.trim(), CUSTOMER_COMMENT_MAX_LENGTH) || null
     const totalWeightKg = cartLines.reduce((sum, line) => sum + line.volume, 0)
+    const orderId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
     const updatedAt = new Date().toISOString()
 
     const { data: client, error: clientError } = await supabase
@@ -6507,9 +6509,10 @@ export default function App() {
     if (clientError) throw new Error(`Не удалось сохранить клиента: ${clientError.message}`)
     if (!client?.id) throw new Error('Supabase не вернул ID клиента.')
 
-    const { data: order, error: orderError } = await supabase
+    const { error: orderError } = await supabase
       .from('orders')
       .insert({
+        id: orderId,
         client_id: client.id,
         customer_name: customerName,
         customer_phone: normalizedPhone,
@@ -6521,18 +6524,20 @@ export default function App() {
         total_weight_kg: totalWeightKg,
         total_amount: cartGrandTotal,
         status: 'new',
+        archived_at: null,
+        created_at: createdAt,
       })
-      .select('id')
-      .single()
 
-    if (orderError) throw new Error(`Не удалось сохранить заказ: ${orderError.message}`)
-    if (!order?.id) throw new Error('Supabase не вернул ID заказа.')
+    if (orderError) {
+      console.error('Failed to create order', orderError)
+      throw new Error(`Не удалось сохранить заказ: ${orderError.message}`)
+    }
 
     const orderItems = cartLines.map((line) => {
       const { pricePerKg } = calcPricing(line.product, line.volume, isB2B)
 
       return {
-        order_id: order.id,
+        order_id: orderId,
         product_id: String(line.product.id),
         product_name: line.product.name,
         quantity_kg: line.volume,
@@ -6544,14 +6549,11 @@ export default function App() {
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
 
     if (itemsError) {
-      const { error: cleanupError } = await supabase.from('orders').delete().eq('id', order.id)
-      const cleanupMessage = cleanupError
-        ? ` Пустой заказ не удалось удалить автоматически: ${cleanupError.message}`
-        : ''
-      throw new Error(`Не удалось сохранить товары заказа. Заказ отменён.${cleanupMessage} Ошибка: ${itemsError.message}`)
+      console.error('Failed to create order items', itemsError)
+      throw new Error(`Не удалось сохранить товары заказа. Ошибка: ${itemsError.message}`)
     }
 
-    return String(order.id)
+    return orderId
   }
 
   const handleSubmitCheckout = async () => {
@@ -6610,6 +6612,8 @@ export default function App() {
       setCartError(null)
       setCheckoutErrors({})
       setCheckoutSubmitError(null)
+      setCheckoutOpen(false)
+      setCheckoutStep('cart')
 
       window.setTimeout(() => {
         window.location.href = whatsappUrl
