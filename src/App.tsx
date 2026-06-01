@@ -6488,57 +6488,11 @@ export default function App() {
         : null
     const comment = limitText(checkoutForm.comment.trim(), CUSTOMER_COMMENT_MAX_LENGTH) || null
     const totalWeightKg = cartLines.reduce((sum, line) => sum + line.volume, 0)
-    const orderId = crypto.randomUUID()
-    const createdAt = new Date().toISOString()
-    const updatedAt = new Date().toISOString()
-
-    const { data: client, error: clientError } = await supabase
-      .from('clients')
-      .upsert(
-        {
-          name: customerName,
-          phone: normalizedPhone,
-          client_type: clientType,
-          updated_at: updatedAt,
-        },
-        { onConflict: 'phone' },
-      )
-      .select('id')
-      .single()
-
-    if (clientError) throw new Error(`Не удалось сохранить клиента: ${clientError.message}`)
-    if (!client?.id) throw new Error('Supabase не вернул ID клиента.')
-
-    const { error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        id: orderId,
-        client_id: client.id,
-        customer_name: customerName,
-        customer_phone: normalizedPhone,
-        client_type: clientType,
-        order_type: orderType,
-        receiving_type: receivingType,
-        delivery_address: deliveryAddress,
-        comment,
-        total_weight_kg: totalWeightKg,
-        total_amount: cartGrandTotal,
-        status: 'new',
-        archived_at: null,
-        created_at: createdAt,
-      })
-
-    if (orderError) {
-      console.error('Failed to create order', orderError)
-      throw new Error(`Не удалось сохранить заказ: ${orderError.message}`)
-    }
-
     const orderItems = cartLines.map((line) => {
       const { pricePerKg } = calcPricing(line.product, line.volume, isB2B)
 
       return {
-        order_id: orderId,
-        product_id: String(line.product.id),
+        product_id: toNumber(line.product.id),
         product_name: line.product.name,
         quantity_kg: line.volume,
         price_per_kg: pricePerKg,
@@ -6546,14 +6500,29 @@ export default function App() {
       }
     })
 
-    const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
+    const { data: orderId, error: orderError } = await supabase.rpc('create_public_order', {
+      p_customer_name: customerName,
+      p_customer_phone: normalizedPhone,
+      p_client_type: clientType,
+      p_order_type: orderType,
+      p_receiving_type: receivingType,
+      p_delivery_address: deliveryAddress,
+      p_comment: comment,
+      p_total_weight_kg: totalWeightKg,
+      p_total_amount: cartGrandTotal,
+      p_items: orderItems,
+    })
 
-    if (itemsError) {
-      console.error('Failed to create order items', itemsError)
-      throw new Error(`Не удалось сохранить товары заказа. Ошибка: ${itemsError.message}`)
+    if (orderError) {
+      console.error('Failed to create order', orderError)
+      throw new Error(`Не удалось сохранить заказ: ${orderError.message}`)
     }
 
-    return orderId
+    if (orderId === null || orderId === undefined) {
+      throw new Error('Supabase не вернул ID заказа.')
+    }
+
+    return String(orderId)
   }
 
   const handleSubmitCheckout = async () => {

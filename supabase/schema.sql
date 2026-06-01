@@ -315,7 +315,8 @@ create policy "owner_delete_clients"
 -- Admins need to read orders and order_items in the Orders tab.
 -- Workers can update order status and staff notes.
 -- The app UI keeps archive/restore actions owner-only.
--- Keep public insert policies if clients create orders from the storefront.
+-- Public storefront clients create orders only through create_public_order().
+-- Direct public insert/select/update/delete on orders and order_items is not allowed.
 
 alter table public.orders
   enable row level security;
@@ -323,11 +324,21 @@ alter table public.orders
 drop policy if exists "public_insert_orders"
   on public.orders;
 
-create policy "public_insert_orders"
+drop policy if exists "admin_insert_orders"
+  on public.orders;
+
+create policy "admin_insert_orders"
   on public.orders
   for insert
-  to anon, authenticated
-  with check (true);
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
 
 drop policy if exists "admin_read_orders"
   on public.orders;
@@ -391,11 +402,21 @@ alter table public.order_items
 drop policy if exists "public_insert_order_items"
   on public.order_items;
 
-create policy "public_insert_order_items"
+drop policy if exists "admin_insert_order_items"
+  on public.order_items;
+
+create policy "admin_insert_order_items"
   on public.order_items
   for insert
-  to anon, authenticated
-  with check (true);
+  to authenticated
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where id = auth.uid()
+        and role in ('owner', 'worker')
+    )
+  );
 
 drop policy if exists "admin_read_order_items"
   on public.order_items;
@@ -430,7 +451,150 @@ create policy "owner_delete_order_items"
   );
 
 -- ============================================================
--- 7. NOTES
+-- 7. PUBLIC ORDER RPC
+-- ============================================================
+-- The storefront calls this function instead of inserting directly into
+-- orders/order_items. It runs in one transaction, gets the integer order id
+-- from the database, inserts order_items with that id, and returns the order id.
+
+create or replace function public.create_public_order(
+  p_customer_name text,
+  p_customer_phone text,
+  p_client_type text,
+  p_order_type text,
+  p_receiving_type text,
+  p_delivery_address text,
+  p_comment text,
+  p_total_weight_kg numeric,
+  p_total_amount numeric,
+  p_items jsonb
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client_id public.clients.id%type;
+  v_order_id public.orders.id%type;
+  v_item jsonb;
+begin
+  if nullif(trim(coalesce(p_customer_name, '')), '') is null then
+    raise exception 'customer_name is required';
+  end if;
+
+  if nullif(trim(coalesce(p_customer_phone, '')), '') is null then
+    raise exception 'customer_phone is required';
+  end if;
+
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'order items are required';
+  end if;
+
+  insert into public.clients (
+    name,
+    phone,
+    client_type,
+    updated_at
+  )
+  values (
+    trim(p_customer_name),
+    trim(p_customer_phone),
+    p_client_type,
+    now()
+  )
+  on conflict (phone) do update
+  set
+    name = excluded.name,
+    client_type = excluded.client_type,
+    updated_at = excluded.updated_at
+  returning id into v_client_id;
+
+  insert into public.orders (
+    client_id,
+    customer_name,
+    customer_phone,
+    client_type,
+    order_type,
+    receiving_type,
+    delivery_address,
+    comment,
+    total_weight_kg,
+    total_amount,
+    status,
+    archived_at,
+    created_at
+  )
+  values (
+    v_client_id,
+    trim(p_customer_name),
+    trim(p_customer_phone),
+    p_client_type,
+    p_order_type,
+    p_receiving_type,
+    p_delivery_address,
+    p_comment,
+    p_total_weight_kg,
+    p_total_amount,
+    'new',
+    null,
+    now()
+  )
+  returning id into v_order_id;
+
+  for v_item in
+    select value from jsonb_array_elements(p_items)
+  loop
+    insert into public.order_items (
+      order_id,
+      product_id,
+      product_name,
+      quantity_kg,
+      price_per_kg,
+      total_amount
+    )
+    values (
+      v_order_id,
+      nullif(v_item->>'product_id', '')::integer,
+      v_item->>'product_name',
+      (v_item->>'quantity_kg')::numeric,
+      (v_item->>'price_per_kg')::numeric,
+      (v_item->>'total_amount')::numeric
+    );
+  end loop;
+
+  return v_order_id;
+end;
+$$;
+
+revoke all on function public.create_public_order(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  numeric,
+  numeric,
+  jsonb
+) from public;
+
+grant execute on function public.create_public_order(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  numeric,
+  numeric,
+  jsonb
+) to anon, authenticated;
+
+-- ============================================================
+-- 8. NOTES
 -- ============================================================
 -- If the admin panel can read products but cannot save changes,
 -- check owner_update_products first.
