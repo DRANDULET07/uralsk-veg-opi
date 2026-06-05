@@ -6809,21 +6809,23 @@ export default function App() {
         <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-white lg:px-6">
           <div className="mx-auto w-full max-w-[1400px]">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <img
-                src="/brand-banner.png"
-                alt="Зеленый Базар Депо"
-                className="hidden h-auto w-full max-w-[900px] rounded-2xl object-contain md:block"
-              />
-              <div className="md:hidden">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm sm:h-14 sm:w-14 lg:h-16 lg:w-16">
+                <img
+                  src="/logo.png"
+                  alt="Зеленый Базар Депо"
+                  className="h-full w-full object-contain"
+                />
+              </div>
+              <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
                   ЗЕЛЕНЫЙ БАЗАР ДЕПО
                 </p>
-                <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight">
+                <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
                   Зеленый Базар Депо
                 </h1>
-                <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90">
-                  Овощи оптом и в розницу
+                <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
+                  Овощи оптом и в розницу в Уральске
                 </p>
               </div>
             </div>
