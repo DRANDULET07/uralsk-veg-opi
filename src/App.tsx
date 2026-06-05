@@ -7,9 +7,11 @@ import {
   CheckCircle2,
   Download,
   Lock,
+  Mail,
   MapPin,
   Minus,
   Package,
+  Phone,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -6807,16 +6809,23 @@ export default function App() {
         <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-white lg:px-6">
           <div className="mx-auto w-full max-w-[1400px]">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
-                ЗЕЛЕНЫЙ БАЗАР ДЕПО
-              </p>
-              <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
-                Зеленый Базар Депо
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
-                Овощи оптом и в розницу в Уральске
-              </p>
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+              <img
+                src="/logo.png"
+                alt="Зеленый Базар Депо"
+                className="h-14 w-14 shrink-0 rounded-2xl bg-white/95 object-cover p-1 shadow-lg shadow-emerald-950/20 sm:h-16 sm:w-16 lg:h-[72px] lg:w-[72px]"
+              />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
+                  ЗЕЛЕНЫЙ БАЗАР ДЕПО
+                </p>
+                <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
+                  Зеленый Базар Депо
+                </h1>
+                <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
+                  Овощи оптом и в розницу в Уральске
+                </p>
+              </div>
             </div>
 
             <div className="mt-2 flex items-center gap-2 sm:mt-0 sm:flex-wrap sm:items-center sm:justify-end">
@@ -6931,7 +6940,7 @@ export default function App() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 rounded-3xl bg-emerald-50/90 p-4 text-sm text-emerald-950 shadow-sm sm:grid-cols-3">
+          <div className="mt-4 grid gap-3 rounded-3xl bg-emerald-50/90 p-4 text-sm text-emerald-950 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
             <div className="flex items-start gap-3 rounded-3xl bg-white p-3 shadow-sm">
               <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
               <div>
@@ -6951,6 +6960,31 @@ export default function App() {
               <div>
                 <p className="font-semibold">Самовывоз или доставка</p>
                 <p className="mt-1 text-xs text-emerald-800/80">Выберите удобный способ получения</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-3xl bg-white p-3 shadow-sm">
+              <Phone className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+              <div className="min-w-0">
+                <p className="font-semibold">Связаться с нами</p>
+                <a
+                  href={`https://wa.me/${WHATSAPP_PHONE}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block text-xs font-semibold text-emerald-800 underline-offset-2 hover:underline"
+                >
+                  WhatsApp: {formatPhoneForDisplay(WHATSAPP_PHONE)}
+                </a>
+                <a
+                  href="mailto:bazardepouralsk@gmail.com"
+                  className="mt-1 flex min-w-0 items-center gap-1 text-xs text-emerald-800/80 underline-offset-2 hover:underline"
+                >
+                  <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">bazardepouralsk@gmail.com</span>
+                </a>
+                <p className="mt-1 flex items-center gap-1 text-xs text-emerald-800/80">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span>Уральск · доставка и самовывоз</span>
+                </p>
               </div>
             </div>
           </div>
