@@ -6809,21 +6809,21 @@ export default function App() {
         <header className="border-b border-brand-800/20 bg-brand-900 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-white lg:px-6">
           <div className="mx-auto w-full max-w-[1400px]">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <div className="min-w-0">
               <img
-                src="/logo.png"
+                src="/brand-banner.png"
                 alt="Зеленый Базар Депо"
-                className="h-14 w-14 shrink-0 rounded-2xl bg-white/95 object-cover p-1 shadow-lg shadow-emerald-950/20 sm:h-16 sm:w-16 lg:h-[72px] lg:w-[72px]"
+                className="hidden h-auto w-full max-w-[900px] rounded-2xl object-contain md:block"
               />
-              <div className="min-w-0">
+              <div className="md:hidden">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
                   ЗЕЛЕНЫЙ БАЗАР ДЕПО
                 </p>
-                <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
+                <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight">
                   Зеленый Базар Депо
                 </h1>
-                <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
-                  Овощи оптом и в розницу в Уральске
+                <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90">
+                  Овощи оптом и в розницу
                 </p>
               </div>
             </div>
