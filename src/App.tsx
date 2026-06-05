@@ -1905,7 +1905,7 @@ function AdminClientsPanel({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
-              URALSK VEG OPI
+              ЗЕЛЕНЫЙ БАЗАР ДЕПО
             </p>
             <h1 className="mt-1 text-xl font-bold sm:text-2xl">Клиенты</h1>
             <p className="mt-1 text-sm text-brand-100">
@@ -1960,7 +1960,7 @@ function AdminClientsPanel({
             const status = getAdminClientStatus(stats)
             const manualStatus = normalizeClientManualStatus(client.client_status)
             const normalizedPhone = normalizePhone(client.phone)
-            const whatsappText = encodeURIComponent('Здравствуйте! Это URALSK VEG OPI по вашему заказу.')
+            const whatsappText = encodeURIComponent('Здравствуйте! Это Зеленый Базар Депо по вашему заказу.')
             const hasNoOrders = stats.orderCount === 0
 
             return (
@@ -3726,7 +3726,7 @@ function AdminPage() {
     const periodLabel = getReportPeriodText(reportPeriod, reportDateFrom, reportDateTo)
 
     if (reportOrders.length === 0) {
-      return ['URALSK VEG OPI', `Отчёт: ${periodLabel}`, 'Заказов нет.'].join('\n')
+      return ['ЗЕЛЕНЫЙ БАЗАР ДЕПО', `Отчёт: ${periodLabel}`, 'Заказов нет.'].join('\n')
     }
 
     const productLines = orderAnalytics.topProducts.map(
@@ -3744,7 +3744,7 @@ function AdminPage() {
     )
 
     return [
-      'URALSK VEG OPI',
+      'ЗЕЛЕНЫЙ БАЗАР ДЕПО',
       `Отчёт: ${periodLabel}`,
       '',
       `Заказов: ${reportOrders.length}`,
@@ -3859,7 +3859,7 @@ function AdminPage() {
       const createSummarySheet = (workbook: import('xlsx').WorkBook) => {
         const now = new Date()
         const summaryRows = [
-          ['ОПТ ОВОЩИ УРАЛЬСК — ОТЧЁТ', ''],
+          ['Зеленый Базар Депо — ОТЧЁТ', ''],
           [],
           ['Период отчёта', periodLabel],
           ['Дата выгрузки', now.toLocaleString('ru-RU')],
@@ -4696,7 +4696,7 @@ function AdminPage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100/80">
-                URALSK VEG OPI
+                ЗЕЛЕНЫЙ БАЗАР ДЕПО
               </p>
               <h1 className="mt-1 text-xl font-bold sm:text-2xl">Админка заказов</h1>
               <p className="mt-0.5 text-xs text-brand-100 sm:mt-1 sm:text-sm">
@@ -6809,10 +6809,10 @@ export default function App() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
-                URALSK VEG OPI
+                ЗЕЛЕНЫЙ БАЗАР ДЕПО
               </p>
               <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
-                ОПТ ОВОЩИ УРАЛЬСК
+                Зеленый Базар Депо
               </h1>
               <p className="mt-1 max-w-2xl text-sm leading-5 text-emerald-100/90 sm:text-base">
                 Овощи оптом и в розницу в Уральске
