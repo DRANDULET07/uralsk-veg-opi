@@ -60,6 +60,15 @@ GET http://localhost:3001/api/products
 
 Returns the products from `public.products` ordered by newest `id` first.
 
+Orders:
+
+```bash
+GET http://localhost:3001/api/orders
+GET http://localhost:3001/api/orders/:id
+```
+
+Returns orders from `public.orders`. The detail endpoint also returns matching rows from `public.order_items`.
+
 ## Build
 
 ```bash
