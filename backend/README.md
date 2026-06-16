@@ -52,6 +52,14 @@ Response:
 }
 ```
 
+Products:
+
+```bash
+GET http://localhost:3001/api/products
+```
+
+Returns the products from `public.products` ordered by newest `id` first.
+
 ## Build
 
 ```bash
