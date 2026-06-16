@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 
 type UpdateOrderStatusBody = {
@@ -12,6 +12,11 @@ export class OrdersController {
   @Get()
   getOrders() {
     return this.ordersService.findAll();
+  }
+
+  @Post()
+  createOrder(@Body() body: unknown) {
+    return this.ordersService.createOrder(body);
   }
 
   @Get(':id')

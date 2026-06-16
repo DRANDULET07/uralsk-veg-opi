@@ -63,6 +63,7 @@ Returns the products from `public.products` ordered by newest `id` first.
 Orders:
 
 ```bash
+POST http://localhost:3001/api/orders
 GET http://localhost:3001/api/orders
 GET http://localhost:3001/api/orders/:id
 PATCH http://localhost:3001/api/orders/:id/status
@@ -78,6 +79,40 @@ Status update body:
 {
   "status": "processing"
 }
+```
+
+Create order with PowerShell:
+
+```powershell
+$bodyObject = @{
+  customer_name = "Тест Backend"
+  customer_phone = "77000000001"
+  client_type = "Оптовик"
+  order_type = "Оптовый"
+  receiving_type = "Самовывоз"
+  delivery_address = $null
+  comment = "Тестовый заказ через backend"
+  total_weight_kg = 25
+  total_amount = 2500
+  items = @(
+    @{
+      product_id = $null
+      product_name = "Тестовый товар"
+      quantity_kg = 25
+      price_per_kg = 100
+      total_amount = 2500
+    }
+  )
+}
+
+$body = $bodyObject | ConvertTo-Json -Depth 5
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/orders" `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $utf8Body
 ```
 
 ## Build
