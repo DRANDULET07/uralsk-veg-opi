@@ -124,6 +124,45 @@ Invoke-RestMethod `
   -Body ([System.Text.Encoding]::UTF8.GetBytes('{"is_in_transit":true,"delivery_eta":"Завтра"}'))
 ```
 
+Clients:
+
+```bash
+GET http://localhost:3001/api/clients
+GET http://localhost:3001/api/clients/:id
+PATCH http://localhost:3001/api/clients/:id/status
+PATCH http://localhost:3001/api/clients/:id/note
+```
+
+Check clients with PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/clients" `
+  -Method Get
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/clients/CLIENT_ID_HERE" `
+  -Method Get
+```
+
+Update client status and note with PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/clients/CLIENT_ID_HERE/status" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"client_status":"vip"}'))
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/clients/CLIENT_ID_HERE/note" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"note":"Позвонить перед доставкой"}'))
+```
+
+Client notes are saved to `client_note` when that column exists. Fallback columns are `note`, `staff_note`, and `worker_note`.
+
 Orders:
 
 ```bash
