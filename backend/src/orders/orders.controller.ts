@@ -5,6 +5,10 @@ type UpdateOrderStatusBody = {
   status?: unknown;
 };
 
+type UpdateOrderNoteBody = {
+  staff_note?: unknown;
+};
+
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
@@ -27,6 +31,11 @@ export class OrdersController {
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() body: UpdateOrderStatusBody) {
     return this.ordersService.updateStatus(id, body.status);
+  }
+
+  @Patch(':id/note')
+  updateStaffNote(@Param('id') id: string, @Body() body: UpdateOrderNoteBody) {
+    return this.ordersService.updateStaffNote(id, body);
   }
 
   @Patch(':id/archive')

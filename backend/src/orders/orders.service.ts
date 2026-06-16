@@ -223,6 +223,33 @@ export class OrdersService {
     }
   }
 
+  async updateStaffNote(id: string, body: unknown) {
+    const orderId = this.parseOrderId(id);
+    const staffNote = this.parseStaffNoteBody(body);
+
+    try {
+      const columns = await this.getTableColumns(
+        'orders',
+        ORDER_COLUMNS,
+        'id',
+      );
+      const noteColumn = this.getOrderNoteColumn(columns);
+      const assignments = [`"${noteColumn}" = $2`];
+
+      if (columns.includes('updated_at')) {
+        assignments.push('"updated_at" = now()');
+      }
+
+      return await this.updateOrder(orderId, columns, assignments, [
+        orderId,
+        staffNote,
+      ]);
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
+      throw new ServiceUnavailableException('Order note update failed');
+    }
+  }
+
   async unarchiveOrder(id: string) {
     const orderId = this.parseOrderId(id);
 
@@ -582,6 +609,48 @@ export class OrdersService {
     }
 
     return status as OrderStatus;
+  }
+
+  private parseStaffNoteBody(body: unknown) {
+    if (!this.isRecord(body)) {
+      throw new BadRequestException('Request body must be an object');
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(body, 'staff_note')) {
+      throw new BadRequestException('staff_note is required');
+    }
+
+    const staffNote = body.staff_note;
+
+    if (staffNote === null) {
+      return null;
+    }
+
+    if (typeof staffNote !== 'string') {
+      throw new BadRequestException('staff_note must be a string or null');
+    }
+
+    if (staffNote.length > 1000) {
+      throw new BadRequestException(
+        'staff_note must be 1000 characters or fewer',
+      );
+    }
+
+    return staffNote;
+  }
+
+  private getOrderNoteColumn(columns: readonly string[]) {
+    if (columns.includes('staff_note')) {
+      return 'staff_note';
+    }
+
+    if (columns.includes('worker_note')) {
+      return 'worker_note';
+    }
+
+    throw new BadRequestException(
+      'orders.staff_note or orders.worker_note column is required to update order note',
+    );
   }
 
   private requireColumn(

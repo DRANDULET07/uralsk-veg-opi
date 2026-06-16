@@ -67,6 +67,7 @@ POST http://localhost:3001/api/orders
 GET http://localhost:3001/api/orders
 GET http://localhost:3001/api/orders/:id
 PATCH http://localhost:3001/api/orders/:id/status
+PATCH http://localhost:3001/api/orders/:id/note
 PATCH http://localhost:3001/api/orders/:id/archive
 PATCH http://localhost:3001/api/orders/:id/unarchive
 ```
@@ -79,6 +80,16 @@ Status update body:
 {
   "status": "processing"
 }
+```
+
+Update order note with PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/orders/42/note" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"staff_note":"Проверить заказ перед отправкой"}'))
 ```
 
 Create order with PowerShell:
