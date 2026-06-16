@@ -65,9 +65,20 @@ Orders:
 ```bash
 GET http://localhost:3001/api/orders
 GET http://localhost:3001/api/orders/:id
+PATCH http://localhost:3001/api/orders/:id/status
+PATCH http://localhost:3001/api/orders/:id/archive
+PATCH http://localhost:3001/api/orders/:id/unarchive
 ```
 
 Returns orders from `public.orders`. The detail endpoint also returns matching rows from `public.order_items`.
+
+Status update body:
+
+```json
+{
+  "status": "processing"
+}
+```
 
 ## Build
 

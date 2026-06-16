@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  HttpException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -36,9 +38,13 @@ const ORDER_ITEM_COLUMNS = [
   'created_at',
 ] as const;
 
+const ORDER_STATUSES = ['new', 'processing', 'completed', 'cancelled'] as const;
+
 type ColumnNameRow = {
   column_name: string;
 };
+
+type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 @Injectable()
 export class OrdersService {
@@ -63,13 +69,14 @@ export class OrdersService {
   }
 
   async findOne(id: string) {
-    const order = await this.findOrderById(id);
+    const orderId = this.parseOrderId(id);
+    const order = await this.findOrderById(orderId);
 
     if (!order) {
       throw new NotFoundException('Order not found');
     }
 
-    const items = await this.findOrderItems(id);
+    const items = await this.findOrderItems(orderId);
 
     return {
       order,
@@ -77,7 +84,91 @@ export class OrdersService {
     };
   }
 
-  private async findOrderById(id: string) {
+  async updateStatus(id: string, status: unknown) {
+    const orderId = this.parseOrderId(id);
+    const nextStatus = this.parseOrderStatus(status);
+
+    try {
+      const columns = await this.getTableColumns(
+        'orders',
+        ORDER_COLUMNS,
+        'id',
+      );
+      this.requireColumn(columns, 'status', 'orders.status column is missing');
+
+      const assignments = ['"status" = $2'];
+
+      if (columns.includes('updated_at')) {
+        assignments.push('"updated_at" = now()');
+      }
+
+      return await this.updateOrder(orderId, columns, assignments, [
+        orderId,
+        nextStatus,
+      ]);
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
+      throw new ServiceUnavailableException('Order status update failed');
+    }
+  }
+
+  async archiveOrder(id: string) {
+    const orderId = this.parseOrderId(id);
+
+    try {
+      const columns = await this.getTableColumns(
+        'orders',
+        ORDER_COLUMNS,
+        'id',
+      );
+      this.requireColumn(
+        columns,
+        'archived_at',
+        'orders.archived_at column is required to archive orders',
+      );
+
+      const assignments = ['"archived_at" = now()'];
+
+      if (columns.includes('updated_at')) {
+        assignments.push('"updated_at" = now()');
+      }
+
+      return await this.updateOrder(orderId, columns, assignments, [orderId]);
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
+      throw new ServiceUnavailableException('Order archive update failed');
+    }
+  }
+
+  async unarchiveOrder(id: string) {
+    const orderId = this.parseOrderId(id);
+
+    try {
+      const columns = await this.getTableColumns(
+        'orders',
+        ORDER_COLUMNS,
+        'id',
+      );
+      this.requireColumn(
+        columns,
+        'archived_at',
+        'orders.archived_at column is required to unarchive orders',
+      );
+
+      const assignments = ['"archived_at" = null'];
+
+      if (columns.includes('updated_at')) {
+        assignments.push('"updated_at" = now()');
+      }
+
+      return await this.updateOrder(orderId, columns, assignments, [orderId]);
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
+      throw new ServiceUnavailableException('Order unarchive update failed');
+    }
+  }
+
+  private async findOrderById(id: number) {
     try {
       const columns = await this.getTableColumns(
         'orders',
@@ -91,12 +182,13 @@ export class OrdersService {
       );
 
       return result.rows[0] ?? null;
-    } catch {
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
       throw new ServiceUnavailableException('Order database query failed');
     }
   }
 
-  private async findOrderItems(orderId: string) {
+  private async findOrderItems(orderId: number) {
     try {
       const columns = await this.getTableColumns(
         'order_items',
@@ -110,9 +202,36 @@ export class OrdersService {
       );
 
       return result.rows;
-    } catch {
+    } catch (error) {
+      this.rethrowKnownHttpException(error);
       throw new ServiceUnavailableException('Order items database query failed');
     }
+  }
+
+  private async updateOrder(
+    orderId: number,
+    columns: readonly string[],
+    assignments: readonly string[],
+    params: unknown[],
+  ) {
+    const selectColumns = this.formatSelectColumns(columns);
+    const result = await this.databaseService.query(
+      `
+        update public.orders
+        set ${assignments.join(', ')}
+        where id = $1
+        returning ${selectColumns}
+      `,
+      params,
+    );
+
+    const order = result.rows[0];
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return order;
   }
 
   private async getTableColumns<T extends readonly string[]>(
@@ -147,5 +266,42 @@ export class OrdersService {
 
   private formatSelectColumns(columns: readonly string[]) {
     return columns.map((column) => `"${column}"`).join(', ');
+  }
+
+  private parseOrderId(id: string) {
+    if (!/^\d+$/.test(id)) {
+      throw new BadRequestException('Order id must be a number');
+    }
+
+    return Number(id);
+  }
+
+  private parseOrderStatus(status: unknown): OrderStatus {
+    if (
+      typeof status !== 'string' ||
+      !ORDER_STATUSES.includes(status as OrderStatus)
+    ) {
+      throw new BadRequestException(
+        'Order status must be one of: new, processing, completed, cancelled',
+      );
+    }
+
+    return status as OrderStatus;
+  }
+
+  private requireColumn(
+    columns: readonly string[],
+    column: string,
+    message: string,
+  ) {
+    if (!columns.includes(column)) {
+      throw new BadRequestException(message);
+    }
+  }
+
+  private rethrowKnownHttpException(error: unknown) {
+    if (error instanceof HttpException) {
+      throw error;
+    }
   }
 }
