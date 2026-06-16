@@ -52,6 +52,29 @@ Response:
 }
 ```
 
+Auth:
+
+Required backend env:
+
+```bash
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Protected test endpoint:
+
+```bash
+GET http://localhost:3001/api/auth/me
+```
+
+Required header:
+
+```bash
+Authorization: Bearer <ACCESS_TOKEN>
+```
+
+Temporary access token source: sign in through the current frontend/admin Supabase Auth flow, then copy `access_token` from browser localStorage or DevTools. A more convenient backend login flow can be added later.
+
 Products:
 
 ```bash
