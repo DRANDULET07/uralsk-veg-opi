@@ -29,6 +29,8 @@ SUPABASE_ANON_KEY=
 
 Do not commit real keys. `backend/.env` is ignored by git.
 
+`DATABASE_URL` should be a PostgreSQL connection string. For Supabase, use the database connection string from the Supabase project settings. SSL is enabled automatically for remote databases and disabled for localhost URLs.
+
 ## Run
 
 ```bash
