@@ -163,6 +163,23 @@ Invoke-RestMethod `
 
 Client notes are saved to `client_note` when that column exists. Fallback columns are `note`, `staff_note`, and `worker_note`.
 
+Reports:
+
+```bash
+GET http://localhost:3001/api/reports/summary
+GET http://localhost:3001/api/reports/products
+GET http://localhost:3001/api/reports/clients
+```
+
+Report date filters are optional:
+
+```bash
+http://localhost:3001/api/reports/summary
+http://localhost:3001/api/reports/summary?dateFrom=2026-06-01&dateTo=2026-06-30
+http://localhost:3001/api/reports/products
+http://localhost:3001/api/reports/clients
+```
+
 Orders:
 
 ```bash
