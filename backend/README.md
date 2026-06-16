@@ -55,10 +55,74 @@ Response:
 Products:
 
 ```bash
+POST http://localhost:3001/api/products
 GET http://localhost:3001/api/products
+PATCH http://localhost:3001/api/products/:id
+PATCH http://localhost:3001/api/products/:id/stock
+PATCH http://localhost:3001/api/products/:id/visibility
+PATCH http://localhost:3001/api/products/:id/transit
 ```
 
 Returns the products from `public.products` ordered by newest `id` first.
+
+Create product with PowerShell:
+
+```powershell
+$bodyObject = @{
+  name = "Тестовый товар"
+  category = "Овощи"
+  retail_price = 120
+  wholesale_price = 100
+  stock_amount = 50
+  unit = "кг"
+  status = "В наличии"
+  is_in_transit = $false
+  is_active = $true
+  in_stock = $true
+  min_order = 1
+}
+
+$body = $bodyObject | ConvertTo-Json -Depth 5
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/products" `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $utf8Body
+```
+
+Update product with PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/products/42" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"name":"Товар обновлен","retail_price":130}'))
+```
+
+Update stock, visibility, and transit with PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/products/42/stock" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"stock_amount":75}'))
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/products/42/visibility" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"is_visible":true}'))
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3001/api/products/42/transit" `
+  -Method Patch `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes('{"is_in_transit":true,"delivery_eta":"Завтра"}'))
+```
 
 Orders:
 
